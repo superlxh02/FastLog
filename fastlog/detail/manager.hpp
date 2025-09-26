@@ -2,7 +2,6 @@
 #include "fastlog/detail/util.hpp"
 #include "logger.hpp"
 #include <filesystem>
-#include <string_view>
 #include <unordered_map>
 
 namespace fastlog::detail {
