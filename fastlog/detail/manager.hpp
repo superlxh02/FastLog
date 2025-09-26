@@ -1,6 +1,7 @@
 #pragma once
 #include "fastlog/detail/util.hpp"
 #include "logger.hpp"
+#include <filesystem>
 #include <string_view>
 #include <unordered_map>
 
@@ -12,8 +13,8 @@ namespace fastlog::detail {
 class FileLoggerManager : util::noncopyable {
 public:
   FileLogger &make_logger(const std::string &loggername,
-                          std::string_view filename) {
-    __loggers.emplace(loggername, filename);
+                          std::filesystem::path filepath) {
+    __loggers.emplace(loggername, filepath);
     return __loggers.at(loggername);
   }
   void delete_logger(const std::string &loggername) {

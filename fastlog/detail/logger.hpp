@@ -113,8 +113,8 @@ public:
 // 文件日志器
 class FileLogger : public BaseLogger<FileLogger> {
 public:
-  FileLogger(std::string_view filename)
-      : __logfs(filename), __current_buffer(std::make_unique<FileLogBuf>()),
+  FileLogger(std::filesystem::path filepath)
+      : __logfs(filepath), __current_buffer(std::make_unique<FileLogBuf>()),
         __work_thread{&FileLogger::work, this} {
     for (int i = 0; i < 2; ++i) {
       __empty_buffers.push_back(std::make_unique<FileLogBuf>());
