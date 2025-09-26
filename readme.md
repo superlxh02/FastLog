@@ -6,7 +6,7 @@ FastLog是一个基于现代C++23标准开发的高性能日志系统。该系�
 
 ## 环境要求
 
-- **编译器**: 支持C++23的编译器 
+- **编译器**: 支持C++23的编译器
 - **操作系统**: Linux/macOS/Windows
 - **构建工具**: CMake 3.10+
 
@@ -24,7 +24,7 @@ int main() {
     fastlog::console.error("This is an error");
   
     // 文件日志
-    auto& logger = fastlog::file::make_logger("app_log", "application", "./logs");
+    auto& logger = fastlog::file::make_logger("app_log");
     logger.info("Application started, user_id: {}", 12345);
     logger.debug("Debug information: {}", "some_data");
     fastlog::file::get_logger("app_log")->info("hello world");
@@ -127,7 +127,7 @@ struct basic_format_string_wrapper {
 };
 ```
 
-- 使用`consteval` - 构造函数在编译时执行，确保格式字符串在编译时就被验证
+- 使用 `consteval` - 构造函数在编译时执行，确保格式字符串在编译时就被验证
 - 使用 `std::format_string<Args...>` - 确保格式字符串中的占位符与参数类型匹配，不匹配会编译错误
 - 使用 `std::source_location::current()` - 自动获取调用日志函数的确切位置
 - 使用 `std::type_identity_t<Args>...` - 避免类型推导
@@ -224,5 +224,3 @@ sequenceDiagram
 - **双缓冲设计**: 前台写入当前缓冲区，后台处理满缓冲区
 - **缓冲区池**: 复用缓冲区对象，减少内存分配开销
 - **优雅关闭**: 确保程序退出时所有日志完整写入
-
-
