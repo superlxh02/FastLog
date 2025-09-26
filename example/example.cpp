@@ -3,10 +3,8 @@
 #include <vector>
 
 // 注册文件日志器
-auto &test_logger1 =
-    fastlog::file::make_logger("test_log1", "../../logs/log1/");
-auto &test_logger2 =
-    fastlog::file::make_logger("test_log2", "../../logs/log2/");
+auto &test_logger1 = fastlog::file::make_logger("test_log1", "../logs/log1/");
+auto &test_logger2 = fastlog::file::make_logger("test_log2", "../logs/log2/");
 
 std::vector<int> vec = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
 
