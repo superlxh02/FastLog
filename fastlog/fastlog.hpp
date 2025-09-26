@@ -1,7 +1,6 @@
 #pragma once
 #include "fastlog/detail/logger.hpp"
 #include "fastlog/detail/manager.hpp"
-#include <print>
 
 namespace fastlog {
 // 控制台日志器，单例，全局唯一
@@ -25,6 +24,9 @@ static inline auto make_logger(const std::string &logger_name,
   std::string filename = file_base_name;
   // 如果有log_dir，文件名 = log_dir + "/" + file_base_name
   if (!log_dir.empty()) {
+    #ifdef _WIN32
+   filename = log_dir + "\\" + file_base_name; 
+    #endif 
     filename = log_dir + "/" + file_base_name;
   }
   return filelogger.make_logger(

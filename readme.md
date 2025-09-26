@@ -27,7 +27,7 @@ int main() {
     auto& logger = fastlog::file::make_logger("app_log", "application", "./logs");
     logger.info("Application started, user_id: {}", 12345);
     logger.debug("Debug information: {}", "some_data");
-  
+    fastlog::file::get_logger("app_log")->info("hello world");
     return 0;
 }
 ```

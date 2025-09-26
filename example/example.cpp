@@ -3,7 +3,12 @@
 #include <vector>
 
 // 注册文件日志器
-auto &test_logger = fastlog::file::make_logger("test_log", "log", "../../logs");
+//Unix/linux/macOS
+auto &test_logger = fastlog::file::make_logger("test_log", "log", "../logs");
+
+//windows
+// auto &test_logger = fastlog::file::make_logger("test_log", "log","..\\..\\logs");
+
 std::atomic<bool> keep_running{true};
 std::vector<int> vec = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
 
@@ -23,14 +28,17 @@ void file_log_test() {
 }
 
 void console_log_test() {
-  fastlog::console.info("hello world {}", 1);
-  fastlog::console.warn("hello world");
-  fastlog::console.error("hello world");
+  for (int i = 0; i < 10; i++) {
+    fastlog::console.info("hello world {}", 1);
+    fastlog::console.warn("hello world");
+    fastlog::console.error("hello world");
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+  }
 }
 
 int main() {
   console_log_test();
-  file_log_test();
+   file_log_test();
 
   return 0;
 }

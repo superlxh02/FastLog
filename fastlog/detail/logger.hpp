@@ -3,11 +3,10 @@
 #include "fastlog/detail/loglevel.hpp"
 #include "fastlog/detail/util.hpp"
 #include "logfstream.hpp"
-#include <algorithm>
-#include <charconv>
 #include <chrono>
 #include <concepts>
 #include <condition_variable>
+#include <cstdint>
 #include <format>
 #include <iostream>
 #include <list>
@@ -22,12 +21,11 @@ namespace fastlog::detail {
 
 // 日志记录结构体
 struct logrecord_t {
-  const char *datetime;         // 日志记录时间
-  int thread_id;                // 线程ID
-  std::string_view thread_name; // 线程名称
-  const char *file_name;        // 文件名
-  size_t line;                  // 行号
-  std::string log;              // 日志内容
+  const char *datetime;  // 日志记录时间
+  uint64_t thread_id;    // 线程ID
+  const char *file_name; // 文件名
+  size_t line;           // 行号
+  std::string log;       // 日志内容
 };
 
 // 日志格式化参数类，封装日志格式化参数
@@ -82,7 +80,7 @@ private:
     if (__level > LEVEL) {
       return;
     }
-    std::string time_str{};
+    std::string time_str;
     auto res = util::get_current_time_tostring();
     if (res.has_value()) {
       time_str = res.value();
@@ -91,7 +89,6 @@ private:
     static_cast<DerviceLogger *>(this)->template log<LEVEL>(logrecord_t{
         .datetime = time_str.c_str(),
         .thread_id = util::get_current_pid(),
-        .thread_name = util::get_current_thread_name(),
         .file_name = fmt_w.loc.file_name(),
         .line = fmt_w.loc.line(),
         .log = std::format(fmt_w.fmt, std::forward<Args>(args)...)});
@@ -106,10 +103,10 @@ class ConsoleLogger : public BaseLogger<ConsoleLogger> {
 public:
   template <LogLevel level> void log(const logrecord_t &record) {
     LogLevelWrapper level_wrapper(level);
-    std::print("{} [{}{}{}] {} {} {}:{} {}\n", record.datetime,
+    std::print("{} [{}{}{}] {} {}:{} {}\n", record.datetime,
                level_wrapper.to_color(), level_wrapper.to_string(),
-               reset_format(), record.thread_id, record.thread_name,
-               record.file_name, record.line, record.log);
+               reset_format(), record.thread_id, record.file_name, record.line,
+               record.log);
   }
 };
 
@@ -161,10 +158,9 @@ public:
       return;
     }
     LogLevelWrapper level_wrapper(level);
-    std::string msg{std::format("{} {} {} {} {}:{} {}\n", record.datetime,
+    std::string msg{std::format("{} {} {}  {}:{} {}\n", record.datetime,
                                 level_wrapper.to_string(), record.thread_id,
-                                record.thread_name, record.file_name,
-                                record.line, record.log)};
+                                record.file_name, record.line, record.log)};
 
     std::lock_guard lock{__mtx}; // 加锁
     // 如果当前缓冲区能够容纳msg，就写入当前缓冲区

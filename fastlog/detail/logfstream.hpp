@@ -1,15 +1,11 @@
 #pragma once
 
-#include "logbuffer.hpp"
-#include "loglevel.hpp"
 #include "util.hpp"
-#include <algorithm>
 #include <array>
 #include <ctime>
 #include <filesystem>
 #include <format>
 #include <fstream>
-#include <sys/time.h>
 namespace fastlog::detail {
 class logfstream {
 public:

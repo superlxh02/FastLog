@@ -1,13 +1,16 @@
 #pragma once
 #include <ctime>
 #include <optional>
-#include <print>
-#include <pthread.h>
 #include <string>
-#include <string_view>
-#include <sys/time.h>
-#include <thread>
+#include<chrono>
+// 平台检测宏
+#ifdef _WIN32
+#include <windows.h>
+#elif defined(__APPLE__) || defined(__linux__)
+#include <pthread.h>
 #include <unistd.h>
+#endif
+
 namespace fastlog::detail::util {
 // 非拷贝类，用于防止类被拷贝
 class noncopyable {
@@ -32,40 +35,46 @@ public:
     return instance;
   }
 };
-// 获取当前时间字符串,同一秒不重复返回
-std::optional<std::string> get_current_time_tostring() {
-  static thread_local std::array<char, 64> buf{};
-  static thread_local time_t last_second{0};
-  struct timeval tv;
-  struct tm tm;
-  gettimeofday(&tv, NULL);
-  // 获取当前时间
-  auto cur_second = tv.tv_sec;
-  // 检查是否是新的秒
-  if (cur_second != last_second) {
-    // 转换为本地时间
-    localtime_r(&tv.tv_sec, &tm);
-    // 格式化为字符串
-    strftime(buf.data(), buf.size(), "%Y-%m-%d-%H:%M:%S", &tm);
-    last_second = cur_second;
-    return {buf.data()};
-  }
-  return std::nullopt;
+std::optional<std::string> get_current_time_tostring(bool is_repeat = true) {
+    static thread_local std::array<char, 64> buf{};
+    static thread_local std::chrono::seconds last_second{ 0 };
+
+    // 获取当前时间
+    auto now = std::chrono::system_clock::now();
+    // 转换为time_t类型
+    auto time_t_now = std::chrono::system_clock::to_time_t(now);
+    // 转换为秒
+    auto current_second = std::chrono::seconds(time_t_now);
+
+    // 检查是否是新的秒
+    if ((current_second.count() != last_second.count()) || is_repeat) {
+        // 转换为本地时间
+        std::tm* local_tm = std::localtime(&time_t_now);
+
+        // 根据平台使用不同的时间格式
+#ifdef _WIN32
+    // Windows平台：使用连字符替代冒号，避免文件名非法字符
+        std::strftime(buf.data(), buf.size(), "%Y-%m-%d-%H-%M-%S", local_tm);
+#else
+    // Unix/Linux/macOS平台：可以使用冒号
+        std::strftime(buf.data(), buf.size(), "%Y-%m-%d-%H:%M:%S", local_tm);
+#endif
+
+        last_second = current_second;
+        return { buf.data() };
+    }
+    return std::nullopt;
 }
+
+
 
 // 获取当前pid
-pid_t get_current_pid() { return ::getpid(); }
-static thread_local std::string
-    t_name; // 设置静态全局线程局部存储，每个线程都有一个独立的t_name变量
-
-// 设置当前线程名称
-static inline auto set_current_thread_name(std::string_view name) {
-  pthread_setname_np(name.data());
-  t_name = name;
+inline auto get_current_pid() -> uint32_t {
+#ifdef _WIN32
+  return static_cast<uint32_t>(GetCurrentProcessId());
+#else
+  return static_cast<uint32_t>(getpid());
+#endif
 }
 
-// 获取当前线程名称
-static inline auto get_current_thread_name() -> std::string_view {
-  return t_name;
-}
 } // namespace fastlog::detail::util
