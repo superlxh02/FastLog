@@ -54,6 +54,11 @@ public:
   }
 
   template <typename... Args>
+  void trace(format_string_wrapper<Args...> fmt, Args &&...args) {
+    format<LogLevel::Trace>(fmt, std::forward<Args>(args)...);
+  }
+
+  template <typename... Args>
   void debug(format_string_wrapper<Args...> fmt, Args &&...args) {
     format<LogLevel::Debug, Args...>(fmt, std::forward<Args>(args)...);
   }
@@ -71,6 +76,10 @@ public:
   template <typename... Args>
   void error(format_string_wrapper<Args...> fmt, Args &&...args) {
     format<LogLevel::Error, Args...>(fmt, std::forward<Args>(args)...);
+  }
+  template <typename... Args>
+  void fatal(format_string_wrapper<Args...> fmt, Args &&...args) {
+    format<LogLevel::Fatal>(fmt, std::forward<Args>(args)...);
   }
 
 private:

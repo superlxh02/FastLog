@@ -40,9 +40,13 @@ void file_log_func2() {
 }
 
 void console_log_test() {
-  fastlog::console.info("hello world {}", 1);
+  fastlog::set_log_level(fastlog::LogLevel::Trace);
+  fastlog::console.trace("hello world");
+  fastlog::console.debug("hello world");
+  fastlog::console.info("hello world");
   fastlog::console.warn("hello world");
   fastlog::console.error("hello world");
+  fastlog::console.fatal("hello world");
 }
 
 void file_log_test() {

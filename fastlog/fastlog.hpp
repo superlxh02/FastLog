@@ -1,5 +1,6 @@
 #pragma once
 #include "fastlog/detail/logger.hpp"
+#include "fastlog/detail/loglevel.hpp"
 #include "fastlog/detail/manager.hpp"
 #include <filesystem>
 
@@ -7,7 +8,7 @@ namespace fastlog {
 // 控制台日志器，单例，全局唯一
 inline auto &console =
     detail::util::Singleton<detail::ConsoleLogger>::instance();
-
+static inline void set_log_level(LogLevel level) { console.set_level(level); }
 } // namespace fastlog
 
 namespace fastlog::file {
@@ -39,4 +40,7 @@ static inline void delete_logger(const std::string &logger_name) {
 static inline auto get_logger(const std::string &logger_name) {
   return filelogger.get_logger(logger_name);
 }
+
+// 设置输出日志的最低级别
+
 } // namespace fastlog::file
