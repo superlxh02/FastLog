@@ -2,13 +2,21 @@
 
 ## 项目介绍
 
-FastLog是一个基于现代C++23标准开发的高性能日志系统。该系统采用异步写入策略和高效的内存管理，提供了控制台日志和文件日志两种输出方式，支持多线程环境下的高并发日志记录。
+FastLog是一个基于现代C++23标准开发的高性能日志系统,支持控制台日志和文件日志两种输出方式。
+
+
+## 使用的C++库特性
+- C++11 `std::array` `std::thread` `std::mutex` `std::condition_variable`
+- C++17 `std::optional` `std::string_view` `std::filesystem`
+- C++20 `std::format` `std::source_location` `concepts`
+- C++23 `std::print`
+
 
 ## 环境要求
 
 - **编译器**: 支持C++23的编译器
 - **操作系统**: Linux/macOS/Windows
-- **构建工具**: CMake 3.10+
+- **构建工具**: CMake 
 
 ## 快速开始
 
@@ -18,79 +26,92 @@ FastLog是一个基于现代C++23标准开发的高性能日志系统。该系�
 #include "fastlog/fastlog.hpp"
 
 int main() {
+    //设置控制台日志最低级别
+     fastlog::set_consolelog_level(fastlog::LogLevel::Trace);
+
     // 控制台日志
     fastlog::console.info("Hello, FastLog! Value: {}", 42);
     fastlog::console.warn("This is a warning");
     fastlog::console.error("This is an error");
   
     // 文件日志
+    //注册文件日志器
     auto& logger = fastlog::file::make_logger("app_log");
     logger.info("Application started, user_id: {}", 12345);
-    logger.debug("Debug information: {}", "some_data");
+    //获取指定文件日志器  
     fastlog::file::get_logger("app_log")->info("hello world");
     return 0;
 }
 ```
 
-## 核心类功能介绍
-
-### LogBuffer (FileLogBuffer)
-
-高效的日志缓冲区实现，基于 `std::array`封装：
-
-- **模板化设计**: 支持编译时指定缓冲区大小
-- **零拷贝写入**: 直接在缓冲区内构造日志数据
-- **内存安全**: 提供边界检查和容量管理
-- **高性能**: 基于连续内存，缓存友好
-
-### logfstream
-
-文件流封装类，提供高级文件操作功能：
-
-- **自动目录创建**: 自动创建日志目录结构
-- **文件轮转**: 支持基于文件大小的自动轮转
-- **缓冲优化**: 自定义文件流缓冲区大小
-- **异常安全**: 提供完整的错误处理机制
-
-### BaseLogger (CRTP基类)
-
-基于CRTP(Curiously Recurring Template Pattern)的日志器基类：
-
-- **编译时多态**: 避免虚函数调用开销
-- **类型安全**: 编译时格式字符串检查
-- **日志级别**: 支持Debug、Info、Warn、Error四个级别
-- **源码定位**: 自动记录调用位置信息
-
-### ConsoleLogger
-
-控制台日志器实现：
-
-- **单例模式**: 全局唯一实例
-- **彩色输出**: 支持不同日志级别的颜色区分
-- **线程安全**: 内置同步机制
-- **即时输出**: 日志立即输出到控制台
-
-### FileLogger
-
-文件日志器实现：
-
-- **异步写入**: 后台线程处理文件I/O操作
-- **双缓冲机制**: 前台写入，后台刷盘
-- **内存池**: 缓冲区复用，减少内存分配
-- **优雅关闭**: 确保所有日志数据完整写入
-
-## 核心技术点
+## 重要设计和代码实现
 
 ### 1. logfstream封装
 
-对标准文件流进行了高级封装，提供了以下增强功能：
-
-- **智能目录管理**: 自动创建日志目录层次结构
-- **文件轮转策略**: 基于文件大小的自动轮转，防止单个文件过大
 - **缓冲区优化**: 自定义缓冲区大小，提升I/O性能
+- **路径管理**: 自动识别并创建日志目录层次结构
 - **时间戳命名**: 自动为轮转文件添加时间戳后缀
+- **文件轮转策略**: 基于文件大小的自动轮转，防止单个文件过大
 
-### 2. CRTP (Curiously Recurring Template Pattern)
+
+```cpp
+class logfstream {
+public:
+  logfstream(std::filesystem::path filepath) : __file_path(filepath) {
+    // 如果文件路有父目录
+    if (__file_path.has_parent_path()) {
+      // 获取日志文件目录
+      auto log_dir = __file_path.parent_path();
+      // 如果日志目录不存在，创建目录
+      if (!std::filesystem::exists(log_dir)) {
+        std::filesystem::create_directories(log_dir);
+      }
+    }
+    // 创建一个新文件
+    this->create();
+    // 设置文件缓冲区
+    __file_stream.rdbuf()->pubsetbuf(__buffer.data(), __buffer.size());
+  }
+
+  ~logfstream() {}
+public:
+  // 刷新输出流缓冲区
+  void flush() { }
+  // 设置单个文件最大大小
+  void set_maxsize(std::size_t maxsize) { __file_maxsize = maxsize; }
+  // 写入数据
+  void write(const char *data, std::size_t size) {}
+private:
+  // 创建新文件
+  void create() {
+    auto time_str = util::get_current_time_tostring();
+    if (time_str.has_value()) {
+      std::filesystem::path log_path =
+          std::format("{}-{}", __file_path.string(), time_str.value());
+      __file_size = 0;
+      if (__file_stream.is_open()) {
+        __file_stream.close();
+      }
+      __file_stream.open(log_path, std::ios::out);
+      if (!__file_stream.is_open()) {
+        throw std::runtime_error("create log file failed");
+      }
+    }
+  }
+private:
+  static inline constexpr std::size_t BUFFER_SIZE = 1024;
+
+private:
+  std::ofstream __file_stream{};                 // 文件输出流
+  std::filesystem::path __file_path{};           // 文件路径
+  std::size_t __file_maxsize{1024 * 1024 * 100}; // 单个文件最大大小
+  std::array<char, BUFFER_SIZE> __buffer{};      // 文件输出流缓冲区
+  std::size_t __file_size{0};                    // 当前文件大小
+  std::filesystem::path __log_path{};            // 日志目录
+};
+```
+
+### 2. 基于CRTP
 
 使用CRTP模式实现编译时多态：
 
@@ -103,28 +124,38 @@ class BaseLogger {
         static_cast<DerviceLogger *>(this)->template log<LEVEL>(record);
     }
 };
+
+class ConsoleLogger : public BaseLogger<ConsoleLogger> {
+public:
+  template <LogLevel level> void log(const logrecord_t &record) {}
+};
+
+class FileLogger : public BaseLogger<FileLogger> {
+public:
+  template <LogLevel level> void log(const logrecord_t &record) {}
+};
 ```
-
-**优势**:
-
-- 零运行时开销的多态
-- 编译时类型检查
-- 更好的内联优化机会
 
 ### 3. 日志格式化参数类封装
 
 ```cpp
-template <typename... Args> 
-struct basic_format_string_wrapper {
+// 日志格式化参数类，封装日志格式化参数
+template <typename... Args> struct basic_format_string_wrapper {
   template <typename T>
     requires std::convertible_to<T, std::string_view>
   consteval basic_format_string_wrapper(
       const T &s, std::source_location loc = std::source_location::current())
       : fmt(s), loc(loc) {}
-  
-  std::format_string<Args...> fmt;  // C++20的编译时格式字符串检查
-  std::source_location loc;         // 自动捕获调用位置
+  std::format_string<Args...> fmt;
+  std::source_location loc;
 };
+
+// 重命名格式化字符串包装器，使用std::type_identity_t避免自动类型推导
+template <typename... Args>
+using format_string_wrapper =
+    basic_format_string_wrapper<std::type_identity_t<Args>...>;
+
+
 ```
 
 - 使用 `consteval` - 构造函数在编译时执行，确保格式字符串在编译时就被验证
@@ -132,9 +163,24 @@ struct basic_format_string_wrapper {
 - 使用 `std::source_location::current()` - 自动获取调用日志函数的确切位置
 - 使用 `std::type_identity_t<Args>...` - 避免类型推导
 
-### 4. 文件异步写入策略
+### 4.文件异步写入
 
-采用生产者-消费者模式实现高性能异步写入：
+**1. 基于生产者-消费者模式实现异步写入**
+- 分成前端生产者线程和后端消费者线程
+- 前端日志写入只操作内存缓冲区，不直接进行文件I/O
+- 后台独立线程负责文件写入，避免阻塞主业务逻辑
+
+**2. 三缓冲区机制**
+- 当前缓冲区、满缓冲区列表、空缓冲区列表的轮转设计
+
+**3. 缓冲区复用优化**
+- 缓冲区池化设计，避免频繁的内存分配和释放
+- 有缓冲区回收机制
+
+**4. 过载保护机制**
+- 当满缓冲区超过15个时自动丢弃多余缓冲区
+- 防止内存无限增长导致系统崩溃
+
 
 **架构设计**:
 
@@ -219,8 +265,62 @@ sequenceDiagram
     Note over BT: 继续等待下次通知
 ```
 
-**核心机制**:
+### 5. 文件日志器管理
 
-- **双缓冲设计**: 前台写入当前缓冲区，后台处理满缓冲区
-- **缓冲区池**: 复用缓冲区对象，减少内存分配开销
-- **优雅关闭**: 确保程序退出时所有日志完整写入
+**基于工厂模式实现文件日志器的创建和管理：**
+
+- 底层存储：使用 std::unordered_map 存储文件日志器，键为日志文件名，值为文件日志器对象
+- 利用单例模式，提供全局唯一文件日志器管理类对象
+- 提供全局函数 `make_logger` 方法基于全局唯一文件日志器管理对象创建文件日志器，参数为日志文件名和文件路径
+- 提供全局函数 `delete_logger` 方法基于全局唯一文件日志器管理对象删除文件日志器，参数为日志文件名
+- 提供全局函数 `get_logger` 方法基于全局唯一文件日志器管理对象获取文件日志器，参数为日志文件名，返回文件日志器指针
+
+```cpp
+class FileLoggerManager : util::noncopyable {
+public:
+  FileLogger &make_logger(const std::string &loggername,
+                          std::filesystem::path filepath) {
+    __loggers.emplace(loggername, filepath);
+    return __loggers.at(loggername);
+  }
+  void delete_logger(const std::string &loggername) {
+    __loggers.erase(loggername);
+  }
+  FileLogger *get_logger(const std::string &loggername) {
+    if (this->__loggers.find(loggername) != this->__loggers.end()) {
+      return std::addressof(__loggers.at(loggername));
+    }
+    return nullptr;
+  }
+
+private:
+  std::unordered_map<std::string, FileLogger> __loggers;
+};
+
+// 文件日志器管理器，单例，全局唯一
+inline auto &fileloggermanager =
+    detail::util::Singleton<detail::FileLoggerManager>::instance();
+// 工厂函数，创建文件日志器
+static inline auto make_logger(const std::string &logger_name,
+                               std::filesystem::path log_path = "")
+    -> detail::FileLogger & {
+
+  if (log_path.empty()) {
+    log_path = std::filesystem::path{logger_name};
+  }
+  if (!log_path.has_filename()) {
+    log_path.append(logger_name);
+  }
+  return fileloggermanager.make_logger(logger_name, log_path);
+}
+// 删除文件日志器
+static inline void delete_logger(const std::string &logger_name) {
+  fileloggermanager.delete_logger(logger_name);
+}
+
+// 获取文件日志器
+[[nodiscard]]
+static inline auto get_logger(const std::string &logger_name) {
+  return fileloggermanager.get_logger(logger_name);
+}
+```

@@ -39,7 +39,7 @@ template <typename... Args> struct basic_format_string_wrapper {
   std::source_location loc;
 };
 
-// 重命名格式化字符串包装器，避免类型推导
+// 重命名格式化字符串包装器，使用std::type_identity_t避免自动类型推导
 template <typename... Args>
 using format_string_wrapper =
     basic_format_string_wrapper<std::type_identity_t<Args>...>;
