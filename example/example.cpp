@@ -1,36 +1,24 @@
 #include "fastlog/fastlog.hpp"
-#include <chrono>
 #include <vector>
-
-// 注册文件日志器
-auto &test_logger1 = fastlog::file::make_logger("test_log1", "../logs/log1/");
-auto &test_logger2 = fastlog::file::make_logger("test_log2", "../logs/log2/");
 
 std::vector<int> vec = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
 void file_log_func1() {
-  auto start = std::chrono::steady_clock::now();
   long long count = 0;
   while (true) {
-    fastlog::file::get_logger("test_log1")
+    fastlog::file::get_logger("file_log1")
         ->info("hello world log1,count : {}, vec :{}", count++, vec);
-    auto now = std::chrono::steady_clock::now();
-    auto time = std::chrono::duration_cast<std::chrono::seconds>(now - start);
-    if (time.count() >= 10) {
+    if (count > 1000000) {
       break;
     }
   }
 }
 
 void file_log_func2() {
-  auto start = std::chrono::steady_clock::now();
   long long count = 0;
   while (true) {
-    fastlog::file::get_logger("test_log2")
-        ->warn("hello world log2,count : {}, vec :{}", count++, vec);
-    auto now = std::chrono::steady_clock::now();
-    auto elapsed =
-        std::chrono::duration_cast<std::chrono::seconds>(now - start);
-    if (elapsed.count() >= 10) {
+    fastlog::file::get_logger("file_log2")
+        ->info("hello world log2,count : {}, vec :{}", count++, vec);
+    if (count > 1000000) {
       break;
     }
   }
@@ -47,16 +35,23 @@ void console_log_test() {
 }
 
 void file_log_test() {
+  // 注册文件日志器
+  auto &file_logger1 = fastlog::file::make_logger("file_log1", FILE_LOG1_PATH);
+  auto &file_logger2 = fastlog::file::make_logger("file_log2", FILE_LOG2_PATH);
   std::thread t1(file_log_func1);
   std::thread t2(file_log_func2);
   t1.join();
   t2.join();
 }
 
-int main() {
+void test() {
   console_log_test();
-  fastlog::console.info("start file log test .............");
+  fastlog::console.info("file log write start .............");
   file_log_test();
+  fastlog::console.info("file log write finish .............");
+}
 
+int main() {
+  test();
   return 0;
 }

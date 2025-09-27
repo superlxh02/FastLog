@@ -17,6 +17,7 @@
 #include <string_view>
 #include <thread>
 #include <utility>
+
 namespace fastlog::detail {
 
 // 日志记录结构体
@@ -131,11 +132,13 @@ public:
   }
 
   ~FileLogger() {
+    // 运行标志位置为false
     __running = false;
+    // 通知工作线程
     __cv.notify_one();
-    if (__work_thread.joinable()) {
+    // 等待工作线程完成工作，回收工作线程
+    if (__work_thread.joinable())
       __work_thread.join();
-    }
   }
 
   /*
@@ -167,10 +170,10 @@ public:
       return;
     }
     LogLevelWrapper level_wrapper(level);
+
     std::string msg{std::format("{} {} {}  {}:{} {}\n", record.datetime,
                                 level_wrapper.to_string(), record.thread_id,
                                 record.file_name, record.line, record.log)};
-
     std::lock_guard lock{__mtx}; // 加锁
     // 如果当前缓冲区能够容纳msg，就写入当前缓冲区
     if (__current_buffer->writeable() > msg.size()) {
@@ -206,8 +209,9 @@ private:
     2. 如果满缓冲区过多，只保留两个
     3. 消费满缓冲区列表中的缓冲区，将数据写入文件缓冲区
     4. 如果满缓冲区列表的缓冲区数量超过2个，只保留2个
-    5. 刷新文件缓冲区，写入文件
-    6. 将满缓冲区列表中的缓冲区移动到空缓冲区列表
+    5.如果运行标志为false,且当前缓冲区不为空，则处理关闭前剩余的日志记录，将当前缓冲区数据写入文件
+    6. 刷新文件缓冲区，写入文件
+    7. 将满缓冲区列表中的缓冲区移动到空缓冲区列表
   */
   void work() {
     constexpr std::size_t max_buffer_list_size = 15;
@@ -217,6 +221,7 @@ private:
       // 等待满缓冲区列表不为空
       __cv.wait_for(lock, std::chrono::milliseconds(3),
                     [this]() -> bool { return !this->__full_buffers.empty(); });
+
       // 如果缓冲区链表的缓冲区数量过多，只剩2个，其余丢弃掉
       if (__full_buffers.size() > max_buffer_list_size) {
         std::cerr << std::format("Dropped log messages {} larger buffers\n",
@@ -231,6 +236,11 @@ private:
       // 如果满缓冲区列表的缓冲区数量超过2个，只保留2个
       if (__full_buffers.size() > 2) {
         __full_buffers.resize(2);
+      }
+
+      // 如果运行标志为false,且当前缓冲区不为空，则处理关闭前剩余的日志记录，将当前缓冲区数据写入文件
+      if (!__running && !__current_buffer->empty()) {
+        __logfs.write(__current_buffer->data(), __current_buffer->size());
       }
       // 刷新文件缓冲区，写入文件
       __logfs.flush();
