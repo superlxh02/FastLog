@@ -23,7 +23,7 @@ namespace fastlog::detail {
 // 日志记录结构体
 struct logrecord_t {
   const char *datetime;  // 日志记录时间
-  uint64_t thread_id;    // 线程ID
+  uint32_t pid;          // 进程ID
   const char *file_name; // 文件名
   size_t line;           // 行号
   std::string log;       // 日志内容
@@ -87,7 +87,7 @@ private:
   // 格式化日志记录,基于crtp
   template <LogLevel LEVEL, typename... Args>
   void format(format_string_wrapper<Args...> fmt_w, Args &&...args) {
-    if (__level > LEVEL) {
+    if (LEVEL < __level) {
       return;
     }
     std::string time_str;
@@ -98,7 +98,7 @@ private:
     // 调用派生类的log方法记录日志
     static_cast<DerviceLogger *>(this)->template log<LEVEL>(logrecord_t{
         .datetime = time_str.c_str(),
-        .thread_id = util::get_current_pid(),
+        .pid = util::get_current_pid(),
         .file_name = fmt_w.loc.file_name(),
         .line = fmt_w.loc.line(),
         .log = std::format(fmt_w.fmt, std::forward<Args>(args)...)});
@@ -115,7 +115,7 @@ public:
     LogLevelWrapper level_wrapper(level);
     std::print("{} [{}{}{}] {} {}:{} {}\n", record.datetime,
                level_wrapper.to_color(), level_wrapper.to_string(),
-               reset_format(), record.thread_id, record.file_name, record.line,
+               reset_format(), record.pid, record.file_name, record.line,
                record.log);
   }
 };
@@ -172,7 +172,7 @@ public:
     LogLevelWrapper level_wrapper(level);
 
     std::string msg{std::format("{} {} {}  {}:{} {}\n", record.datetime,
-                                level_wrapper.to_string(), record.thread_id,
+                                level_wrapper.to_string(), record.pid,
                                 record.file_name, record.line, record.log)};
     std::lock_guard lock{__mtx}; // 加锁
     // 如果当前缓冲区能够容纳msg，就写入当前缓冲区

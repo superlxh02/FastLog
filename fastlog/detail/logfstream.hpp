@@ -72,6 +72,5 @@ private:
   std::size_t __file_maxsize{1024 * 1024 * 100}; // 单个文件最大大小
   std::array<char, BUFFER_SIZE> __buffer{};      // 文件输出流缓冲区
   std::size_t __file_size{0};                    // 当前文件大小
-  std::filesystem::path __log_path{};            // 日志目录
 };
 } // namespace fastlog::detail
