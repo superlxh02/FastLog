@@ -1,6 +1,7 @@
 #pragma once
 
 #include <string_view>
+#include <utility>
 namespace fastlog {
 // 日志级别
 enum class LogLevel { Trace, Debug, Info, Warn, Error, Fatal };
