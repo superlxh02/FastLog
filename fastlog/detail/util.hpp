@@ -1,8 +1,11 @@
 #pragma once
 #include <chrono>
 #include <ctime>
+#include <functional>
 #include <optional>
 #include <string>
+#include <string_view>
+#include <thread>
 // 平台检测宏
 #ifdef _WIN32
 #include <windows.h>
@@ -73,6 +76,20 @@ inline auto get_current_pid() -> uint32_t {
 #else
   return static_cast<uint32_t>(getpid());
 #endif
+}
+
+inline auto get_current_thread_id() -> uint64_t {
+  return static_cast<uint64_t>(
+      std::hash<std::thread::id>{}(std::this_thread::get_id()));
+}
+
+[[nodiscard]]
+inline auto short_source_path(std::string_view file_name) -> std::string_view {
+  const auto pos = file_name.find_last_of("/\\");
+  if (pos == std::string_view::npos) {
+    return file_name;
+  }
+  return file_name.substr(pos + 1);
 }
 
 } // namespace fastlog::detail::util

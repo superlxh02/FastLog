@@ -35,6 +35,11 @@ public:
   // 设置单个文件最大大小
   void set_maxsize(std::size_t maxsize) { __file_maxsize = maxsize; }
 
+  [[nodiscard]]
+  auto maxsize() const noexcept -> std::size_t {
+    return __file_maxsize;
+  }
+
   // 写入数据
   void write(const char *data, std::size_t size) {
     __file_stream.write(data, size);
