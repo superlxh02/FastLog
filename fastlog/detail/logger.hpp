@@ -9,12 +9,10 @@
 #include <concepts>
 #include <condition_variable>
 #include <cstdint>
-#include <format>
 #include <iostream>
 #include <list>
 #include <memory>
 #include <mutex>
-#include <print>
 #include <source_location>
 #include <sstream>
 #include <string>
@@ -24,6 +22,35 @@
 #include <utility>
 
 namespace fastlog::detail {
+
+template <typename T>
+inline auto format_arg(std::ostringstream &oss, const T &arg) -> void {
+  oss << arg;
+}
+
+template <typename T>
+inline auto format_arg(std::ostringstream &oss, const std::vector<T> &vec) -> void {
+  oss << "[";
+  for (size_t i = 0; i < vec.size(); ++i) {
+    if (i > 0) oss << ", ";
+    oss << vec[i];
+  }
+  oss << "]";
+}
+
+template <typename... Args>
+inline auto format_string(const std::string &fmt, Args &&...args) -> std::string {
+  std::ostringstream oss;
+  (format_arg(oss, args), ...);
+  return oss.str();
+}
+
+template <typename... Args>
+inline auto format_string(const char *fmt, Args &&...args) -> std::string {
+  std::ostringstream oss;
+  (format_arg(oss, args), ...);
+  return oss.str();
+}
 
 // 日志细节模式：
 // Compact 适合终端阅读，Full 适合文件落盘与问题定位
@@ -51,10 +78,10 @@ struct logrecord_t {
 template <typename... Args> struct basic_format_string_wrapper {
   template <typename T>
     requires std::convertible_to<T, std::string_view>
-  consteval basic_format_string_wrapper(
+  constexpr basic_format_string_wrapper(
       const T &s, std::source_location loc = std::source_location::current())
       : fmt(s), loc(loc) {}
-  std::format_string<Args...> fmt;
+  std::string fmt;
   std::source_location loc;
 };
 
@@ -101,7 +128,7 @@ inline auto format_exception_block(std::string_view summary,
                                    std::string stacktrace) -> std::string {
   stacktrace = trim_trailing_newlines(std::move(stacktrace));
   if (stacktrace.empty()) {
-    return std::format("Exception:\n{}", indent_multiline(summary));
+    return format_string("Exception:\n{}", indent_multiline(summary));
   }
 
   auto title_pos = stacktrace.find('\n');
@@ -113,11 +140,11 @@ inline auto format_exception_block(std::string_view summary,
   }
 
   if (body.empty()) {
-    return std::format("Exception:\n{}\n{}\n{}",
+    return format_string("Exception:\n{}\n{}\n{}",
                        indent_multiline(summary), title, "  <empty>");
   }
 
-  return std::format("Exception:\n{}\n{}\n{}", indent_multiline(summary), title,
+  return format_string("Exception:\n{}\n{}\n{}", indent_multiline(summary), title,
                      indent_multiline(body));
 }
 
@@ -129,7 +156,7 @@ inline auto align_multiline_message(std::string_view prefix,
                                     std::string_view message) -> std::string {
   const auto newline_pos = message.find('\n');
   if (newline_pos == std::string_view::npos) {
-    return std::format("{}{}", prefix, message);
+    return format_string("{}{}", prefix, message);
   }
 
   std::string result;
@@ -165,28 +192,25 @@ inline auto format_log_message(const logrecord_t &record,
   const auto effective_mode =
       record.force_full_detail ? LogDetailMode::Full : detail_mode;
   if (effective_mode == LogDetailMode::Full) {
-    const auto plain_prefix =
-        std::format("{} [{}] [tid:{}] [{}:{}] ", record.datetime,
-                    level_wrapper.to_string(), record.thread_id, record.file_name,
-                    record.line);
+    std::ostringstream oss1;
+    oss1 << record.datetime << " [" << level_wrapper.to_string() << "] [tid:" << record.thread_id << "] [" << record.file_name << ":" << record.line << "] ";
+    const auto plain_prefix = oss1.str();
     if (enable_color) {
-      const auto color_prefix = std::format(
-          "{} [{}{}{}] [tid:{}] [{}:{}] {}", record.datetime,
-          level_wrapper.to_color(), level_wrapper.to_string(), reset_format(),
-          record.thread_id, record.file_name, record.line, "");
+      std::ostringstream oss2;
+      oss2 << record.datetime << " [" << level_wrapper.to_color() << level_wrapper.to_string() << reset_format() << "] [tid:" << record.thread_id << "] [" << record.file_name << ":" << record.line << "] ";
+      const auto color_prefix = oss2.str();
       return align_multiline_message(color_prefix, plain_prefix, record.log);
     }
     return align_multiline_message(plain_prefix, plain_prefix, record.log);
   }
 
-  const auto plain_prefix =
-      std::format("{} [{}] [tid:{}] ", record.datetime, level_wrapper.to_string(),
-                  record.thread_id);
+  std::ostringstream oss3;
+  oss3 << record.datetime << " [" << level_wrapper.to_string() << "] [tid:" << record.thread_id << "] ";
+  const auto plain_prefix = oss3.str();
   if (enable_color) {
-    const auto color_prefix =
-        std::format("{} [{}{}{}] [tid:{}] {}", record.datetime,
-                    level_wrapper.to_color(), level_wrapper.to_string(),
-                    reset_format(), record.thread_id, "");
+    std::ostringstream oss4;
+    oss4 << record.datetime << " [" << level_wrapper.to_color() << level_wrapper.to_string() << reset_format() << "] [tid:" << record.thread_id << "] ";
+    const auto color_prefix = oss4.str();
     return align_multiline_message(color_prefix, plain_prefix, record.log);
   }
   return align_multiline_message(plain_prefix, plain_prefix, record.log);
@@ -197,7 +221,7 @@ inline auto format_log_message(const logrecord_t &record,
 // 1. 级别过滤
 // 2. source_location 捕获
 // 3. 异常与堆栈格式化
-template <typename DerviceLogger> class BaseLogger : util::noncopyable {
+template <typename DerivedLogger> class BaseLogger : util::noncopyable {
 public:
   void set_level(LogLevel level) { __level = level; }
   [[nodiscard]]
@@ -267,8 +291,7 @@ public:
       exception(ex, loc);
     } catch (...) {
       log_preformatted<LogLevel::Error>(
-          std::format("Exception:\n  {}\nStacktrace\n  <non-std exception>",
-                      prefix),
+          format_string("Exception:\n  {}\nStacktrace\n  <non-std exception>", prefix),
           loc);
     }
   }
@@ -282,18 +305,22 @@ private:
       return;
     }
     std::string time_str;
-    auto res = util::get_current_time_tostring();
+    auto res = util::get_current_time_to_string();
     if (res.has_value()) {
       time_str = res.value();
     }
     // 调用派生类的log方法记录日志
-    static_cast<DerviceLogger *>(this)->template log<LEVEL>(logrecord_t{
+    std::ostringstream oss;
+    (format_arg(oss, args), ...);
+    std::string log_content = oss.str();
+    
+    static_cast<DerivedLogger *>(this)->template log<LEVEL>(logrecord_t{
         .datetime = time_str.c_str(),
         .thread_id = util::get_current_thread_id(),
         .file_name = fmt_w.loc.file_name(),
         .line = fmt_w.loc.line(),
         .force_full_detail = false,
-        .log = std::format(fmt_w.fmt, std::forward<Args>(args)...)});
+        .log = log_content});
   }
 
   // 预格式化日志路径：
@@ -304,11 +331,11 @@ private:
       return;
     }
     std::string time_str;
-    auto res = util::get_current_time_tostring();
+    auto res = util::get_current_time_to_string();
     if (res.has_value()) {
       time_str = res.value();
     }
-    static_cast<DerviceLogger *>(this)->template log<LEVEL>(logrecord_t{
+    static_cast<DerivedLogger *>(this)->template log<LEVEL>(logrecord_t{
         .datetime = time_str.c_str(),
         .thread_id = util::get_current_thread_id(),
         .file_name = loc.file_name(),
@@ -339,7 +366,7 @@ private:
 class ConsoleLogger : public BaseLogger<ConsoleLogger> {
 public:
   template <LogLevel level> void log(const logrecord_t &record) {
-    std::print("{}\n", format_log_message<level>(record, detail_mode(), true));
+    std::cout << format_log_message<level>(record, detail_mode(), true) << "\n";
   }
 };
 
@@ -491,8 +518,9 @@ private:
 
       // 如果缓冲区链表的缓冲区数量过多，只剩2个，其余丢弃掉
       if (__full_buffers.size() > max_buffer_list_size) {
-        std::cerr << std::format("Dropped log messages {} larger buffers\n",
-                                 __full_buffers.size() - 2);
+        std::ostringstream oss;
+        oss << "Dropped log messages " << (__full_buffers.size() - 2) << " larger buffers\n";
+        std::cerr << oss.str();
         __full_buffers.resize(2);
       }
       // 消费满缓冲区列表中的缓冲区，将数据写入文件缓冲区

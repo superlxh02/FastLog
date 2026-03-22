@@ -4,8 +4,8 @@
 #include <array>
 #include <ctime>
 #include <filesystem>
-#include <format>
 #include <fstream>
+#include <sstream>
 namespace fastlog::detail {
 class logfstream {
 public:
@@ -53,10 +53,11 @@ public:
 private:
   // 创建新文件
   void create() {
-    auto time_str = util::get_current_time_tostring();
+    auto time_str = util::get_current_time_to_string();
     if (time_str.has_value()) {
-      std::filesystem::path log_path =
-          std::format("{}-{}", __file_path.string(), time_str.value());
+      std::ostringstream oss;
+      oss << __file_path.string() << "-" << time_str.value();
+      std::filesystem::path log_path = oss.str();
       __file_size = 0;
       if (__file_stream.is_open()) {
         __file_stream.close();
