@@ -1,5 +1,9 @@
 {
     "dependencies": [
-        "cpptrace"
-    ]
+        {
+            "name": "cpptrace",
+            "platform": "windows"
+        }
+    ],
+    "builtin-baseline": "b472291f295551b7127359ea38fdd2ca092f6f1b"
 }

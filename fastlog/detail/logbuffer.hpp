@@ -10,9 +10,12 @@ public:
   FileLogBuffer() noexcept : __cur{__data.begin()} {}
 
   void write(const std::string &str) noexcept {
-    assert(writeable() > str.size());
+    const auto str_size = str.size();
+    if (writeable() < str_size) {
+      return;
+    }
     std::copy(str.begin(), str.end(), __cur);
-    __cur += str.size();
+    __cur += str_size;
   };
 
   [[nodiscard]]

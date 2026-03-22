@@ -27,7 +27,6 @@ public:
     case LogLevel::Fatal:
       return "FATAL";
     default:
-      std::unreachable();
       return "unknown log level";
     }
   }
@@ -47,7 +46,6 @@ public:
     case LogLevel::Fatal:
       return "\033[45m"; // purple
     default:
-      std::unreachable();
       return "NOT DEFINE COLOR";
     }
   }

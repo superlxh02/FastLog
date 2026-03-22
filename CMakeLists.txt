@@ -3,7 +3,23 @@ project(fastlog)
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_BUILD_TYPE Debug)
 
-find_package(cpptrace CONFIG REQUIRED)
+include(FetchContent)
+
+set(FETCHCONTENT_SOURCE_DIR_CPPTRACE "${CMAKE_CURRENT_SOURCE_DIR}/external/cpptrace")
+
+FetchContent_Declare(
+    cpptrace
+    GIT_REPOSITORY https://github.com/jeremy-rifkin/cpptrace.git
+    GIT_TAG v1.0.4
+    GIT_SHALLOW TRUE
+)
+
+set(FETCHCONTENT_UPDATES_DISCONNECTED ON)
+set(FETCHCONTENT_QUIET OFF)
+set(FETCHCONTENT_BASE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/external")
+
+FetchContent_MakeAvailable(cpptrace)
+
 set(LIB  cpptrace::cpptrace)
 # 定义文件日志路径
 add_definitions(-DFILE_LOG1_PATH="${CMAKE_CURRENT_SOURCE_DIR}/logs/log1/")
