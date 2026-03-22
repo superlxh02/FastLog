@@ -43,6 +43,7 @@ struct logrecord_t {
   uint64_t thread_id;    // 线程ID
   const char *file_name; // 文件名
   size_t line;           // 行号
+  bool force_full_detail; // 即使处于简洁模式，也保留源码位置等完整信息
   std::string log;       // 日志内容
 };
 
@@ -161,7 +162,9 @@ inline auto format_log_message(const logrecord_t &record,
                                LogDetailMode detail_mode,
                                bool enable_color = false) -> std::string {
   LogLevelWrapper level_wrapper(level);
-  if (detail_mode == LogDetailMode::Full) {
+  const auto effective_mode =
+      record.force_full_detail ? LogDetailMode::Full : detail_mode;
+  if (effective_mode == LogDetailMode::Full) {
     const auto plain_prefix =
         std::format("{} [{}] [tid:{}] [{}:{}] ", record.datetime,
                     level_wrapper.to_string(), record.thread_id, record.file_name,
@@ -289,6 +292,7 @@ private:
         .thread_id = util::get_current_thread_id(),
         .file_name = fmt_w.loc.file_name(),
         .line = fmt_w.loc.line(),
+        .force_full_detail = false,
         .log = std::format(fmt_w.fmt, std::forward<Args>(args)...)});
   }
 
@@ -309,6 +313,7 @@ private:
         .thread_id = util::get_current_thread_id(),
         .file_name = loc.file_name(),
         .line = loc.line(),
+        .force_full_detail = true,
         .log = std::move(message)});
   }
 

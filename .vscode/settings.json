@@ -1,11 +1,6 @@
 {
-    "vcpkg.target.useManifest": true,
+    "vcpkg.target.useManifest": false,
     "cmake.configureArgs": [
-        "-DVCPKG_TARGET_TRIPLET=arm64-osx",
-        "-DVCPKG_MANIFEST_MODE=ON",
-        "-DCMAKE_TOOLCHAIN_FILE=~/.local/vcpkg/scripts/buildsystems/vcpkg.cmake"
-    ],
-    "vcpkg.target.defaultTriplet": "arm64-osx",
-    "vcpkg.target.hostTriplet": "arm64-osx",
-    "vcpkg.target.useStaticLib": false
+        "-DVCPKG_MANIFEST_MODE=OFF"
+    ]
 }

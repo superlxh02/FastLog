@@ -116,9 +116,8 @@ void broadcast_exception_log_test() {
 }
 
 int main() {
-  // 先验证普通日志，再切换终端为全量模式验证异常定位信息
+  // 先验证普通日志，再在终端简洁模式下验证异常仍保留源码定位
   test();
-  fastlog::set_consolelog_detail_mode(fastlog::LogDetailMode::Full);
   console_exception_log_test();
   file_exception_log_test();
   broadcast_exception_log_test();
