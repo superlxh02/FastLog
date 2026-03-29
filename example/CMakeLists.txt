@@ -1,0 +1,7 @@
+add_executable(simple_example simple_example.cpp)
+set_property(TARGET simple_example PROPERTY CXX_SCAN_FOR_MODULES OFF)
+target_link_libraries(simple_example PRIVATE fastlog::fastlog)
+
+add_executable(advanced_example advanced_example.cpp)
+set_property(TARGET advanced_example PROPERTY CXX_SCAN_FOR_MODULES OFF)
+target_link_libraries(advanced_example PRIVATE fastlog::fastlog)

@@ -1,0 +1,9 @@
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+
+if(@FASTLOG_WITH_CPPTRACE@)
+    find_dependency(cpptrace CONFIG QUIET)
+endif()
+
+include("${CMAKE_CURRENT_LIST_DIR}/fastlogTargets.cmake")

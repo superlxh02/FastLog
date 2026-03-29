@@ -1,0 +1,6 @@
+title: FastLog API Docs
+description: FastLog 对外公开接口说明文档
+theme: jekyll-theme-cayman
+markdown: kramdown
+kramdown:
+  input: GFM

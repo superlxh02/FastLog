@@ -1,0 +1,116 @@
+<svg width="1600" height="980" viewBox="0 0 1600 980" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1600" y2="980" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F8FAFC"/>
+      <stop offset="1" stop-color="#EEF4FF"/>
+    </linearGradient>
+    <marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+      <path d="M0 0L8 4L0 8V0Z" fill="#64748B"/>
+    </marker>
+    <style>
+      .title { font: 700 34px 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif; fill: #0F172A; }
+      .subtitle { font: 500 16px 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif; fill: #475569; }
+      .section { font: 700 18px 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif; fill: #334155; }
+      .boxTitle { font: 700 16px 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif; fill: #0F172A; }
+      .boxSub { font: 500 12px 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif; fill: #475569; }
+      .hint { font: 600 12px 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif; fill: #64748B; }
+    </style>
+  </defs>
+
+  <rect width="1600" height="980" rx="24" fill="url(#bg)"/>
+
+  <text x="92" y="96" class="title">FastLog 整体架构图</text>
+  <text x="92" y="126" class="subtitle">采用“固定网格 + 独立模块 + 清晰通道”的整体架构表达，从业务调用贯通到最终输出。</text>
+
+  <text x="120" y="196" class="section">业务侧</text>
+  <text x="330" y="196" class="section">接入层</text>
+  <text x="660" y="196" class="section">核心引擎</text>
+  <text x="980" y="196" class="section">输出通道</text>
+  <text x="1260" y="196" class="section">输出目标</text>
+
+  <rect x="92" y="248" width="180" height="96" rx="18" fill="#FFFFFF" stroke="#94A3B8" stroke-width="2.2"/>
+  <text x="120" y="288" class="boxTitle">业务应用</text>
+  <text x="120" y="312" class="boxSub">服务、工具、测试代码</text>
+
+  <rect x="310" y="248" width="260" height="96" rx="18" fill="#E0F2FE" stroke="#0284C7" stroke-width="2.2"/>
+  <text x="338" y="288" class="boxTitle">控制台入口</text>
+  <text x="338" y="312" class="boxSub">console facade</text>
+
+  <rect x="310" y="392" width="260" height="96" rx="18" fill="#E0F2FE" stroke="#0284C7" stroke-width="2.2"/>
+  <text x="338" y="432" class="boxTitle">文件入口</text>
+  <text x="338" y="456" class="boxSub">file facade</text>
+
+  <rect x="310" y="536" width="260" height="96" rx="18" fill="#E0F2FE" stroke="#0284C7" stroke-width="2.2"/>
+  <text x="338" y="576" class="boxTitle">高级自定义入口</text>
+  <text x="338" y="600" class="boxSub">advanced api</text>
+
+  <rect x="620" y="248" width="290" height="96" rx="18" fill="#ECFDF5" stroke="#16A34A" stroke-width="2.2"/>
+  <text x="648" y="288" class="boxTitle">日志器管理中心</text>
+  <text x="648" y="312" class="boxSub">registry</text>
+
+  <rect x="620" y="392" width="290" height="112" rx="18" fill="#ECFDF5" stroke="#16A34A" stroke-width="2.2"/>
+  <text x="648" y="432" class="boxTitle">日志记录构造与分发</text>
+  <text x="648" y="456" class="boxSub">logger</text>
+  <text x="648" y="478" class="boxSub">级别过滤、采样元信息、构造日志记录</text>
+
+  <rect x="620" y="552" width="290" height="96" rx="18" fill="#ECFDF5" stroke="#16A34A" stroke-width="2.2"/>
+  <text x="648" y="592" class="boxTitle">日志格式化模块</text>
+  <text x="648" y="616" class="boxSub">formatter / pattern formatter</text>
+
+  <rect x="970" y="320" width="220" height="96" rx="18" fill="#FFF7ED" stroke="#EA580C" stroke-width="2.2"/>
+  <text x="998" y="360" class="boxTitle">同步输出通道</text>
+  <text x="998" y="384" class="boxSub">sync sinks</text>
+
+  <rect x="970" y="480" width="220" height="96" rx="18" fill="#FFF7ED" stroke="#EA580C" stroke-width="2.2"/>
+  <text x="998" y="520" class="boxTitle">异步输出通道</text>
+  <text x="998" y="544" class="boxSub">async sink</text>
+
+  <rect x="1240" y="248" width="260" height="96" rx="18" fill="#FAF5FF" stroke="#9333EA" stroke-width="2.2"/>
+  <text x="1268" y="288" class="boxTitle">终端输出</text>
+  <text x="1268" y="312" class="boxSub">stdout / stderr</text>
+
+  <rect x="1240" y="392" width="260" height="128" rx="18" fill="#FAF5FF" stroke="#9333EA" stroke-width="2.2"/>
+  <text x="1268" y="432" class="boxTitle">文件输出</text>
+  <text x="1268" y="456" class="boxSub">基础文件（basic file sink）</text>
+  <text x="1268" y="478" class="boxSub">轮转文件（rotating file sink）</text>
+  <text x="1268" y="500" class="boxSub">按天切分文件（daily file sink）</text>
+
+  <rect x="1240" y="568" width="260" height="96" rx="18" fill="#FAF5FF" stroke="#9333EA" stroke-width="2.2"/>
+  <text x="1268" y="608" class="boxTitle">回调输出</text>
+  <text x="1268" y="632" class="boxSub">custom callback sink</text>
+
+  <rect x="1240" y="744" width="260" height="96" rx="18" fill="#FFFFFF" stroke="#94A3B8" stroke-width="2.2"/>
+  <text x="1268" y="784" class="boxTitle">最终日志文本</text>
+  <text x="1268" y="808" class="boxSub">格式化后的日志内容进入最终输出</text>
+
+  <!-- 业务侧 -> 接入层 -->
+  <path d="M272 296H310" stroke="#64748B" stroke-width="2" marker-end="url(#arrow)"/>
+  <path d="M182 344V440H310" stroke="#94A3B8" stroke-width="1.8" marker-end="url(#arrow)"/>
+  <path d="M182 344V584H310" stroke="#94A3B8" stroke-width="1.8" marker-end="url(#arrow)"/>
+
+  <!-- 接入层 -> registry -->
+  <path d="M570 296H585V280H620" stroke="#64748B" stroke-width="2" marker-end="url(#arrow)"/>
+  <path d="M570 440H585V296H620" stroke="#94A3B8" stroke-width="1.8" marker-end="url(#arrow)"/>
+  <path d="M570 584H585V312H620" stroke="#94A3B8" stroke-width="1.8" marker-end="url(#arrow)"/>
+
+  <!-- 核心引擎内部 -->
+  <path d="M765 344V392" stroke="#64748B" stroke-width="2" marker-end="url(#arrow)"/>
+  <path d="M765 504V552" stroke="#64748B" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- logger -> 输出通道 -->
+  <path d="M910 448H940V368H970" stroke="#64748B" stroke-width="2" marker-end="url(#arrow)"/>
+  <path d="M910 448H940V528H970" stroke="#94A3B8" stroke-width="1.8" marker-end="url(#arrow)"/>
+
+  <!-- 输出通道 -> 输出目标 -->
+  <path d="M1190 368H1210V296H1240" stroke="#64748B" stroke-width="2" marker-end="url(#arrow)"/>
+  <path d="M1080 416V456H1240" stroke="#94A3B8" stroke-width="1.8" marker-end="url(#arrow)"/>
+  <path d="M1190 528H1210V456H1240" stroke="#64748B" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- 输出目标 -> 最终日志文本 -->
+  <path d="M1500 456H1530V792H1500" stroke="#94A3B8" stroke-width="1.8" marker-end="url(#arrow)"/>
+  <path d="M1370 664V744" stroke="#94A3B8" stroke-width="1.8" marker-end="url(#arrow)"/>
+
+  <text x="326" y="690" class="hint">多种入口统一接入</text>
+  <text x="662" y="690" class="hint">核心引擎负责管理、构造与格式化</text>
+  <text x="982" y="690" class="hint">同步 / 异步通道连接不同输出目标</text>
+</svg>
