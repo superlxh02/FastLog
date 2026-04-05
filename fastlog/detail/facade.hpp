@@ -14,18 +14,23 @@ namespace fastlog {
 // 面向“基础日志输出需求”的简洁文件 logger 配置。
 // 目标是让用户在只关心落盘、级别和细节模式时，不必直接接触底层 sink 组合。
 struct FileLoggerOptions {
-  log_level level{log_level::debug}; // 文件 logger 的最小日志级别。
-  detail_mode detail_mode{detail_mode::compact}; // 文件输出默认使用简洁模式。
-  source_path_mode source_path{source_path_mode::filename}; // 源码路径输出模式。
-  std::filesystem::path source_root{}; // 保留字段；当前源码位置输出模式不再依赖路径裁剪基准目录。
+  ::fastlog::log_level level{
+      ::fastlog::log_level::debug}; // 文件 logger 的最小日志级别。
+  ::fastlog::detail_mode detail_mode{
+      ::fastlog::detail_mode::compact}; // 文件输出默认使用简洁模式。
+  ::fastlog::source_path_mode source_path{
+      ::fastlog::source_path_mode::filename}; // 源码路径输出模式。
+  std::filesystem::path
+      source_root{}; // 保留字段；当前源码位置输出模式不再依赖路径裁剪基准目录。
   std::size_t max_file_size{1024 * 1024 * 100}; // 单个日志文件最大大小。
-  std::size_t max_files{5}; // 保留的轮转文件数量。
-  bool async_write{true}; // 是否默认使用异步包装。
-  overflow_policy overflow{overflow_policy::block}; // 异步队列满载策略。
-  std::size_t queue_size{8192}; // 异步队列容量。
+  std::size_t max_files{5};                     // 保留的轮转文件数量。
+  bool async_write{true};                       // 是否默认使用异步包装。
+  ::fastlog::overflow_policy overflow{
+      ::fastlog::overflow_policy::block};        // 异步队列满载策略。
+  std::size_t queue_size{8192};                  // 异步队列容量。
   std::chrono::milliseconds flush_interval{250}; // 异步周期性 flush 间隔。
-  bool show_thread_id{true}; // 是否输出线程 ID。
-  bool show_process_id{false}; // 是否输出进程 ID。
+  bool show_thread_id{true};                     // 是否输出线程 ID。
+  bool show_process_id{false};                   // 是否输出进程 ID。
 };
 
 namespace detail {
@@ -34,11 +39,12 @@ namespace detail {
 // 这里记录了通过简单文件接口创建的 logger 及其关键 sink，
 // 让对外句柄在 logger 被从注册表移除后仍能保持稳定生命周期。
 struct simple_file_logger_context {
-  logger_ptr logger; // 对外暴露的 logger 共享所有权。
-  std::shared_ptr<rotating_file_sink> rotating_sink; // 负责真实文件落盘的轮转 sink。
-  std::shared_ptr<async_sink> async_sink; // 可选的异步包装层。
-  std::filesystem::path path; // 当前 logger 对应的日志路径。
-  bool async_write{true}; // 当前是否启用了异步写入。
+  logger_ptr logger_handle; // 对外暴露的 logger 共享所有权。
+  std::shared_ptr<rotating_file_sink>
+      rotating_sink_handle; // 负责真实文件落盘的轮转 sink。
+  std::shared_ptr<async_sink> async_sink_handle; // 可选的异步包装层。
+  std::filesystem::path log_path;                // 当前 logger 对应的日志路径。
+  bool async_write{true};                        // 当前是否启用了异步写入。
 };
 
 } // namespace detail
@@ -54,65 +60,67 @@ public:
   // 由内部 registry 创建稳定句柄。
   FileLogger(logger_ptr logger_ptr_value,
              std::shared_ptr<detail::simple_file_logger_context> context)
-      : logger_(std::move(logger_ptr_value)), context_(std::move(context)) {}
+      : logger_handle_(std::move(logger_ptr_value)),
+        context_handle_(std::move(context)) {}
 
   // 当前句柄是否有效。
-  [[nodiscard]] auto valid() const -> bool { return logger_ != nullptr; }
+  [[nodiscard]] auto valid() const -> bool { return logger_handle_ != nullptr; }
 
   // 允许直接写 if (logger)。
   explicit operator bool() const { return valid(); }
 
   // 返回底层 logger 的共享指针，便于与高级 API 互操作。
-  [[nodiscard]] auto share() const -> logger_ptr { return logger_; }
+  [[nodiscard]] auto share() const -> logger_ptr { return logger_handle_; }
 
   // 获取 logger 名称；若句柄为空则返回空字符串引用。
   [[nodiscard]] auto name() const -> const std::string & {
     static const std::string empty_name;
-    return logger_ != nullptr ? logger_->name() : empty_name;
+    return logger_handle_ != nullptr ? logger_handle_->name() : empty_name;
   }
 
   // 获取当前 sink 快照。
   [[nodiscard]] auto sinks() const -> std::vector<sink_ptr> {
-    return logger_ != nullptr ? logger_->sinks() : std::vector<sink_ptr>{};
+    return logger_handle_ != nullptr ? logger_handle_->sinks()
+                                     : std::vector<sink_ptr>{};
   }
 
   // 设置 logger 自身级别。
   void set_level(log_level level) const {
-    if (logger_ != nullptr) {
-      logger_->set_level(level);
+    if (logger_handle_ != nullptr) {
+      logger_handle_->set_level(level);
     }
   }
 
   // 获取 logger 当前级别。
   [[nodiscard]] auto level() const -> log_level {
-    return logger_ != nullptr ? logger_->level() : log_level::off;
+    return logger_handle_ != nullptr ? logger_handle_->level() : log_level::off;
   }
 
   // 开启 backtrace ring buffer。
   void enable_backtrace(std::size_t capacity) const {
-    if (logger_ != nullptr) {
-      logger_->enable_backtrace(capacity);
+    if (logger_handle_ != nullptr) {
+      logger_handle_->enable_backtrace(capacity);
     }
   }
 
   // 关闭 backtrace ring buffer。
   void disable_backtrace() const {
-    if (logger_ != nullptr) {
-      logger_->disable_backtrace();
+    if (logger_handle_ != nullptr) {
+      logger_handle_->disable_backtrace();
     }
   }
 
   // 将缓存的 backtrace 补发到 sink。
   void flush_backtrace() const {
-    if (logger_ != nullptr) {
-      logger_->flush_backtrace();
+    if (logger_handle_ != nullptr) {
+      logger_handle_->flush_backtrace();
     }
   }
 
   // 主动刷新所有 sink。
   void flush() const {
-    if (logger_ != nullptr) {
-      logger_->flush();
+    if (logger_handle_ != nullptr) {
+      logger_handle_->flush();
     }
   }
 
@@ -120,76 +128,76 @@ public:
   template <typename... Args>
   void log(log_level level_value, detail::format_string<Args...> fmt,
            Args &&...args) const {
-    if (logger_ != nullptr) {
-      logger_->log(level_value, fmt, std::forward<Args>(args)...);
+    if (logger_handle_ != nullptr) {
+      logger_handle_->log(level_value, fmt, std::forward<Args>(args)...);
     }
   }
 
   // trace 级别快捷接口。
   template <typename... Args>
   void trace(detail::format_string<Args...> fmt, Args &&...args) const {
-    if (logger_ != nullptr) {
-      logger_->trace(fmt, std::forward<Args>(args)...);
+    if (logger_handle_ != nullptr) {
+      logger_handle_->trace(fmt, std::forward<Args>(args)...);
     }
   }
 
   // debug 级别快捷接口。
   template <typename... Args>
   void debug(detail::format_string<Args...> fmt, Args &&...args) const {
-    if (logger_ != nullptr) {
-      logger_->debug(fmt, std::forward<Args>(args)...);
+    if (logger_handle_ != nullptr) {
+      logger_handle_->debug(fmt, std::forward<Args>(args)...);
     }
   }
 
   // info 级别快捷接口。
   template <typename... Args>
   void info(detail::format_string<Args...> fmt, Args &&...args) const {
-    if (logger_ != nullptr) {
-      logger_->info(fmt, std::forward<Args>(args)...);
+    if (logger_handle_ != nullptr) {
+      logger_handle_->info(fmt, std::forward<Args>(args)...);
     }
   }
 
   // warn 级别快捷接口。
   template <typename... Args>
   void warn(detail::format_string<Args...> fmt, Args &&...args) const {
-    if (logger_ != nullptr) {
-      logger_->warn(fmt, std::forward<Args>(args)...);
+    if (logger_handle_ != nullptr) {
+      logger_handle_->warn(fmt, std::forward<Args>(args)...);
     }
   }
 
   // error 级别快捷接口。
   template <typename... Args>
   void error(detail::format_string<Args...> fmt, Args &&...args) const {
-    if (logger_ != nullptr) {
-      logger_->error(fmt, std::forward<Args>(args)...);
+    if (logger_handle_ != nullptr) {
+      logger_handle_->error(fmt, std::forward<Args>(args)...);
     }
   }
 
   // fatal 级别快捷接口。
   template <typename... Args>
   void fatal(detail::format_string<Args...> fmt, Args &&...args) const {
-    if (logger_ != nullptr) {
-      logger_->fatal(fmt, std::forward<Args>(args)...);
+    if (logger_handle_ != nullptr) {
+      logger_handle_->fatal(fmt, std::forward<Args>(args)...);
     }
   }
 
   // 记录一条已经格式化好的消息。
-  void log_message(log_level level_value, std::string message,
-                   std::source_location location =
-                       std::source_location::current(),
-                   bool force_source_location = false) const {
-    if (logger_ != nullptr) {
-      logger_->log_message(level_value, std::move(message), location,
-                           force_source_location);
+  void
+  log_message(log_level level_value, std::string message,
+              std::source_location location = std::source_location::current(),
+              bool force_source_location = false) const {
+    if (logger_handle_ != nullptr) {
+      logger_handle_->log_message(level_value, std::move(message), location,
+                                  force_source_location);
     }
   }
 
   // 输出异常日志。
-  void exception(const std::exception &exception,
-                 std::source_location location =
-                     std::source_location::current()) const {
-    if (logger_ != nullptr) {
-      logger_->exception(exception, location);
+  void exception(
+      const std::exception &exception,
+      std::source_location location = std::source_location::current()) const {
+    if (logger_handle_ != nullptr) {
+      logger_handle_->exception(exception, location);
     }
   }
 
@@ -197,8 +205,8 @@ public:
   void current_exception(
       std::string_view prefix = "Unhandled exception",
       std::source_location location = std::source_location::current()) const {
-    if (logger_ != nullptr) {
-      logger_->current_exception(prefix, location);
+    if (logger_handle_ != nullptr) {
+      logger_handle_->current_exception(prefix, location);
     }
   }
 
@@ -245,7 +253,8 @@ public:
     }
 
     for (const auto &sink_ptr_value : sinks()) {
-      if (auto rotating = std::dynamic_pointer_cast<rotating_file_sink>(sink_ptr_value);
+      if (auto rotating =
+              std::dynamic_pointer_cast<rotating_file_sink>(sink_ptr_value);
           rotating != nullptr) {
         rotating->set_max_file_size(max_file_size);
       }
@@ -256,11 +265,13 @@ private:
   // 获取句柄关联的轮转 sink。
   [[nodiscard]] auto rotating_sink() const
       -> std::shared_ptr<rotating_file_sink> {
-    return context_ != nullptr ? context_->rotating_sink : nullptr;
+    return context_handle_ != nullptr ? context_handle_->rotating_sink_handle
+                                      : nullptr;
   }
 
-  logger_ptr logger_; // 底层 logger 的共享所有权。
-  std::shared_ptr<detail::simple_file_logger_context> context_; // 与 facade 对应的稳定上下文。
+  logger_ptr logger_handle_; // 底层 logger 的共享所有权。
+  std::shared_ptr<detail::simple_file_logger_context>
+      context_handle_; // 与 facade 对应的稳定上下文。
 };
 
 } // namespace file
@@ -290,10 +301,10 @@ public:
     {
       std::lock_guard lock(mutex_);
       if (auto it = contexts_.find(logger_name); it != contexts_.end()) {
-        if (it->second->path == log_path &&
+        if (it->second->log_path == log_path &&
             it->second->async_write == options.async_write) {
           apply_options(*it->second, options);
-          return file::FileLogger{it->second->logger, it->second};
+          return file::FileLogger{it->second->logger_handle, it->second};
         }
         retired_context_before_build = std::move(it->second);
         contexts_.erase(it);
@@ -317,30 +328,28 @@ public:
     std::shared_ptr<async_sink> async;
     if (options.async_write) {
       async = std::make_shared<async_sink>(
-          rotating,
-          async_options{.queue_size = options.queue_size,
-                        .policy = options.overflow,
-                        .flush_interval = options.flush_interval});
+          rotating, async_options{.queue_size = options.queue_size,
+                                  .policy = options.overflow,
+                                  .flush_interval = options.flush_interval});
       sink_ptr_value = async;
     }
 
-    auto logger_ptr_value =
-        std::make_shared<logger>(logger_name, std::vector<sink_ptr>{sink_ptr_value},
-                                 options.level);
+    auto logger_ptr_value = std::make_shared<logger>(
+        logger_name, std::vector<sink_ptr>{sink_ptr_value}, options.level);
     auto context = std::make_shared<simple_file_logger_context>(
-        simple_file_logger_context{.logger = logger_ptr_value,
-                                   .rotating_sink = rotating,
-                                   .async_sink = async,
-                                   .path = log_path,
+        simple_file_logger_context{.logger_handle = logger_ptr_value,
+                                   .rotating_sink_handle = rotating,
+                                   .async_sink_handle = async,
+                                   .log_path = log_path,
                                    .async_write = options.async_write});
 
     {
       std::lock_guard lock(mutex_);
       if (auto it = contexts_.find(logger_name); it != contexts_.end()) {
-        if (it->second->path == log_path &&
+        if (it->second->log_path == log_path &&
             it->second->async_write == options.async_write) {
           apply_options(*it->second, options);
-          return file::FileLogger{it->second->logger, it->second};
+          return file::FileLogger{it->second->logger_handle, it->second};
         }
         retired_context_after_build = std::move(it->second);
         it->second = context;
@@ -374,14 +383,16 @@ public:
         context = it->second;
       }
     }
-    return context != nullptr ? file::FileLogger{context->logger, context}
-                              : file::FileLogger{};
+    return context != nullptr
+               ? file::FileLogger{context->logger_handle, context}
+               : file::FileLogger{};
   }
 
 private:
   // 将简洁配置映射到内部 sink 配置。
-  static void apply_format(const std::shared_ptr<rotating_file_sink> &sink_ptr_value,
-                           const FileLoggerOptions &options) {
+  static void
+  apply_format(const std::shared_ptr<rotating_file_sink> &sink_ptr_value,
+               const FileLoggerOptions &options) {
     auto config = sink_ptr_value->format_config_value();
     detail::apply_detail_mode_preset(&config, options.detail_mode);
     if (options.detail_mode == detail_mode::compact) {
@@ -397,9 +408,9 @@ private:
   // 对已有上下文应用轻量配置更新。
   static void apply_options(simple_file_logger_context &context,
                             const FileLoggerOptions &options) {
-    context.logger->set_level(options.level);
-    context.rotating_sink->set_max_file_size(options.max_file_size);
-    apply_format(context.rotating_sink, options);
+    context.logger_handle->set_level(options.level);
+    context.rotating_sink_handle->set_max_file_size(options.max_file_size);
+    apply_format(context.rotating_sink_handle, options);
   }
 
   std::mutex mutex_; // 保护 facade 上下文表的互斥锁。
@@ -416,7 +427,8 @@ public:
   // 输出 trace 日志。
   template <typename... Args>
   void trace(detail::format_string<Args...> fmt, Args &&...args) const {
-    if (const auto logger_ptr_value = console_logger(); logger_ptr_value != nullptr) {
+    if (const auto logger_ptr_value = console_logger();
+        logger_ptr_value != nullptr) {
       logger_ptr_value->trace(fmt, std::forward<Args>(args)...);
     }
   }
@@ -424,7 +436,8 @@ public:
   // 输出 debug 日志。
   template <typename... Args>
   void debug(detail::format_string<Args...> fmt, Args &&...args) const {
-    if (const auto logger_ptr_value = console_logger(); logger_ptr_value != nullptr) {
+    if (const auto logger_ptr_value = console_logger();
+        logger_ptr_value != nullptr) {
       logger_ptr_value->debug(fmt, std::forward<Args>(args)...);
     }
   }
@@ -432,7 +445,8 @@ public:
   // 输出 info 日志。
   template <typename... Args>
   void info(detail::format_string<Args...> fmt, Args &&...args) const {
-    if (const auto logger_ptr_value = console_logger(); logger_ptr_value != nullptr) {
+    if (const auto logger_ptr_value = console_logger();
+        logger_ptr_value != nullptr) {
       logger_ptr_value->info(fmt, std::forward<Args>(args)...);
     }
   }
@@ -440,7 +454,8 @@ public:
   // 输出 warn 日志。
   template <typename... Args>
   void warn(detail::format_string<Args...> fmt, Args &&...args) const {
-    if (const auto logger_ptr_value = console_logger(); logger_ptr_value != nullptr) {
+    if (const auto logger_ptr_value = console_logger();
+        logger_ptr_value != nullptr) {
       logger_ptr_value->warn(fmt, std::forward<Args>(args)...);
     }
   }
@@ -448,7 +463,8 @@ public:
   // 输出 error 日志。
   template <typename... Args>
   void error(detail::format_string<Args...> fmt, Args &&...args) const {
-    if (const auto logger_ptr_value = console_logger(); logger_ptr_value != nullptr) {
+    if (const auto logger_ptr_value = console_logger();
+        logger_ptr_value != nullptr) {
       logger_ptr_value->error(fmt, std::forward<Args>(args)...);
     }
   }
@@ -456,16 +472,18 @@ public:
   // 输出 fatal 日志。
   template <typename... Args>
   void fatal(detail::format_string<Args...> fmt, Args &&...args) const {
-    if (const auto logger_ptr_value = console_logger(); logger_ptr_value != nullptr) {
+    if (const auto logger_ptr_value = console_logger();
+        logger_ptr_value != nullptr) {
       logger_ptr_value->fatal(fmt, std::forward<Args>(args)...);
     }
   }
 
   // 输出异常日志。
-  void exception(const std::exception &exception,
-                 std::source_location location =
-                     std::source_location::current()) const {
-    if (const auto logger_ptr_value = console_logger(); logger_ptr_value != nullptr) {
+  void exception(
+      const std::exception &exception,
+      std::source_location location = std::source_location::current()) const {
+    if (const auto logger_ptr_value = console_logger();
+        logger_ptr_value != nullptr) {
       logger_ptr_value->exception(exception, location);
     }
   }
@@ -474,14 +492,16 @@ public:
   void current_exception(
       std::string_view prefix = "Unhandled exception",
       std::source_location location = std::source_location::current()) const {
-    if (const auto logger_ptr_value = console_logger(); logger_ptr_value != nullptr) {
+    if (const auto logger_ptr_value = console_logger();
+        logger_ptr_value != nullptr) {
       logger_ptr_value->current_exception(prefix, location);
     }
   }
 
   // 主动刷新控制台 sink。
   void flush() const {
-    if (const auto logger_ptr_value = console_logger(); logger_ptr_value != nullptr) {
+    if (const auto logger_ptr_value = console_logger();
+        logger_ptr_value != nullptr) {
       logger_ptr_value->flush();
     }
   }
@@ -508,7 +528,8 @@ inline void delete_logger(const std::string &logger_name) {
 // 简洁文件 logger 查询接口。
 [[nodiscard]] inline auto get_logger(const std::string &logger_name)
     -> FileLogger {
-  return detail::simple_file_logger_registry::instance().get_logger(logger_name);
+  return detail::simple_file_logger_registry::instance().get_logger(
+      logger_name);
 }
 
 // 设置文件 logger 的最小级别。
@@ -522,10 +543,9 @@ inline void set_detail_mode(const FileLogger &logger_ref, detail_mode mode) {
 }
 
 // 设置文件 logger 的源码路径模式。
-inline void set_source_path_mode(
-    const FileLogger &logger_ref,
-    source_path_mode mode,
-    std::filesystem::path source_root = {}) {
+inline void set_source_path_mode(const FileLogger &logger_ref,
+                                 source_path_mode mode,
+                                 std::filesystem::path source_root = {}) {
   logger_ref.set_source_path_mode(mode, std::move(source_root));
 }
 
