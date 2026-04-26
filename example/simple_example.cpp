@@ -32,10 +32,12 @@ void demo_configure_console() {
 // 完全自定义 pattern 的终端输出示例。
 void demo_custom_console_pattern() {
   auto sink = fastlog::make_stdout_sink();
-  sink->set_pattern("%Y | [%l] | %v");
   auto config = sink->format_config_value();
   config.timestamp_with_microseconds = false;
-  sink->set_format_config(config);
+  config.source_path = fastlog::source_path_mode::relative;
+  config.source_root = std::filesystem::current_path();
+  sink->set_pattern("%D %H:%M:%S.%e | [%L/%l] | %@ | %v")
+      .set_format_config(config);
 
   auto logger = fastlog::create_logger("pattern_console_demo", {sink},
                                        fastlog::log_level::trace);
@@ -67,17 +69,39 @@ void demo_configure_file() {
                                            "logs/simple_config.log", options);
   logger.info("file compact mode is the default");
 
-  fastlog::file::set_detail_mode(logger, fastlog::detail_mode::full);
+  logger.set_detail_mode(fastlog::detail_mode::full);
   logger.warn("file full mode prints all context with absolute path");
 
-  fastlog::file::set_detail_mode(logger, fastlog::detail_mode::compact);
-  fastlog::file::set_level(logger, fastlog::log_level::debug);
-  fastlog::file::set_max_file_size(logger, 1024 * 1024);
-  fastlog::file::set_source_path_mode(logger,
-                                      fastlog::source_path_mode::filename,
-                                      std::filesystem::current_path());
+  logger.set_detail_mode(fastlog::detail_mode::compact)
+      .set_level(fastlog::log_level::debug)
+      .set_max_file_size(1024 * 1024)
+      .set_source_path_mode(fastlog::source_path_mode::filename,
+                            std::filesystem::current_path());
   logger.debug("simple file configuration updated");
   fastlog::file::flush(logger);
+}
+
+// 独立链式构造接口示例：无宏、多 sink、异步文件、相对源码路径。
+void demo_pipeline_builder() {
+  auto console_sink = fastlog::make_stdout_sink();
+  auto file_sink =
+      fastlog::make_rotating_file_sink("logs/simple_pipeline.log",
+                                       {.max_file_size = 1024 * 1024,
+                                        .max_files = 3});
+
+  auto logger =
+      fastlog::pipeline("simple_pipeline")
+          .at(fastlog::log_level::trace)
+          .format_as("%Y [%^%L%$] [%n] [%@] %v")
+          .source(fastlog::source_path_mode::relative,
+                  std::filesystem::current_path())
+          .write_to(console_sink)
+          .write_to_async(file_sink, {.queue_size = 4096,
+                                      .policy = fastlog::overflow_policy::block})
+          .install();
+
+  logger->info("pipeline logger without macros");
+  logger->flush();
 }
 
 } // namespace
@@ -88,5 +112,6 @@ int main() {
   demo_custom_console_pattern();
   demo_basic_file();
   demo_configure_file();
+  demo_pipeline_builder();
   return 0;
 }

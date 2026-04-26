@@ -19,9 +19,11 @@ endif()
 option(FASTLOG_BUILD_EXAMPLES "Build FastLog examples" ON)
 option(FASTLOG_BUILD_TESTS "Build FastLog tests" ON)
 option(FASTLOG_BUILD_BENCHMARKS "Build FastLog benchmarks" OFF)
+option(FASTLOG_BENCHMARK_WITH_SPDLOG "Fetch spdlog and build comparison benchmarks" OFF)
 option(FASTLOG_WITH_CPPTRACE "Enable cpptrace-powered stacktraces" ON)
 option(FASTLOG_USE_STD_FORMAT "Use std::format backend" ON)
 option(FASTLOG_FETCH_CPPTRACE "Fetch cpptrace if it is not available locally" ON)
+option(FASTLOG_ENABLE_WARNINGS "Enable strict warnings for FastLog examples/tests/benchmarks" ON)
 
 if(NOT FASTLOG_USE_STD_FORMAT)
   message(FATAL_ERROR "FASTLOG currently requires FASTLOG_USE_STD_FORMAT=ON.")
@@ -38,6 +40,17 @@ target_include_directories(fastlog
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
 target_compile_definitions(fastlog INTERFACE FASTLOG_USE_STD_FORMAT=1)
+
+function(fastlog_enable_warnings target_name)
+  if(NOT FASTLOG_ENABLE_WARNINGS)
+    return()
+  endif()
+  if(MSVC)
+    target_compile_options(${target_name} PRIVATE /W4 /permissive-)
+  else()
+    target_compile_options(${target_name} PRIVATE -Wall -Wextra -Wpedantic)
+  endif()
+endfunction()
 
 # 栈追踪能力是可选依赖：优先复用本地安装，其次按需拉取 cpptrace。
 if(FASTLOG_WITH_CPPTRACE)
@@ -76,6 +89,10 @@ endif()
 if(FASTLOG_BUILD_TESTS)
   enable_testing()
   add_subdirectory(tests)
+endif()
+
+if(FASTLOG_BUILD_BENCHMARKS)
+  add_subdirectory(benchmarks)
 endif()
 
 # 安装头文件与导出目标，供 find_package(fastlog CONFIG REQUIRED) 使用。

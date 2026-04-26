@@ -7,6 +7,7 @@
 #include <deque>
 #include <exception>
 #include <format>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <string_view>
@@ -27,11 +28,17 @@ public:
   // name 是逻辑名称，sinks 是输出目标列表，level 是 logger 自身的最小级别。
   logger(std::string name, std::vector<sink_ptr> sinks = {},
          log_level level = log_level::info)
-      : name_(std::move(name)), sinks_(std::move(sinks)), level_(level) {}
+      : name_(std::move(name)), level_(level),
+        single_sink_(sinks.size() == 1 ? sinks.front() : nullptr),
+        required_metadata_bits_(
+            encode_metadata(combine_required_metadata(sinks))),
+        sinks_snapshot_(
+            std::make_shared<const std::vector<sink_ptr>>(std::move(sinks))) {}
 
   // 设置 logger 自身的最小级别。
-  void set_level(log_level level) {
+  auto set_level(log_level level) -> logger & {
     level_.store(level, std::memory_order_relaxed);
+    return *this;
   }
 
   // 读取 logger 自身的最小级别。
@@ -39,42 +46,69 @@ public:
     return level_.load(std::memory_order_relaxed);
   }
 
+  // 轻量级级别判断，便于调用方在构造昂贵参数前手动短路。
+  [[nodiscard]] auto should_log(log_level level_value) const -> bool {
+    return level_value >= level();
+  }
+
   // 获取 logger 名称。
   [[nodiscard]] auto name() const -> const std::string & { return name_; }
 
   // 整体替换 sink 列表。
-  void set_sinks(std::vector<sink_ptr> sinks) {
+  auto set_sinks(std::vector<sink_ptr> sinks) -> logger & {
     std::lock_guard lock(sinks_mutex_);
-    sinks_ = std::move(sinks);
+    single_sink_ = sinks.size() == 1 ? sinks.front() : nullptr;
+    required_metadata_bits_.store(
+        encode_metadata(combine_required_metadata(sinks)),
+        std::memory_order_release);
+    auto next = std::make_shared<const std::vector<sink_ptr>>(std::move(sinks));
+    std::atomic_store_explicit(&sinks_snapshot_, std::move(next),
+                               std::memory_order_release);
+    return *this;
   }
 
   // 追加一个新的 sink。
-  void add_sink(sink_ptr sink_ptr_value) {
+  auto add_sink(sink_ptr sink_ptr_value) -> logger & {
     std::lock_guard lock(sinks_mutex_);
-    sinks_.push_back(std::move(sink_ptr_value));
+    auto current =
+        std::atomic_load_explicit(&sinks_snapshot_, std::memory_order_acquire);
+    auto next = std::make_shared<std::vector<sink_ptr>>(
+        current != nullptr ? *current : std::vector<sink_ptr>{});
+    next->push_back(std::move(sink_ptr_value));
+    single_sink_ = next->size() == 1 ? next->front() : nullptr;
+    required_metadata_bits_.store(
+        encode_metadata(combine_required_metadata(*next)),
+        std::memory_order_release);
+    std::shared_ptr<const std::vector<sink_ptr>> published = std::move(next);
+    std::atomic_store_explicit(&sinks_snapshot_, std::move(published),
+                               std::memory_order_release);
+    return *this;
   }
 
   // 获取当前 sink 快照，避免调用方长期持有内部容器引用。
   [[nodiscard]] auto sinks() const -> std::vector<sink_ptr> {
-    std::lock_guard lock(sinks_mutex_);
-    return sinks_;
+    const auto snapshot =
+        std::atomic_load_explicit(&sinks_snapshot_, std::memory_order_acquire);
+    return snapshot != nullptr ? *snapshot : std::vector<sink_ptr>{};
   }
 
   // 开启 backtrace ring buffer。
   // capacity 表示最多保留多少条最近日志。
-  void enable_backtrace(std::size_t capacity) {
+  auto enable_backtrace(std::size_t capacity) -> logger & {
     std::lock_guard lock(backtrace_mutex_);
     backtrace_capacity_ = capacity;
-    backtrace_enabled_ = capacity > 0;
     backtrace_buffer_.clear();
+    backtrace_enabled_.store(capacity > 0, std::memory_order_release);
+    return *this;
   }
 
   // 关闭 backtrace ring buffer，并清空已缓存内容。
-  void disable_backtrace() {
+  auto disable_backtrace() -> logger & {
+    backtrace_enabled_.store(false, std::memory_order_release);
     std::lock_guard lock(backtrace_mutex_);
-    backtrace_enabled_ = false;
     backtrace_capacity_ = 0;
     backtrace_buffer_.clear();
+    return *this;
   }
 
   // 将 ring buffer 中缓存的日志重新补发到所有 sink。
@@ -94,6 +128,14 @@ public:
     for (auto &sink_ptr_value : sinks()) {
       sink_ptr_value->flush();
     }
+  }
+
+  // 设置所有当前 sink 的自动 flush 阈值。
+  auto set_flush_on(log_level level_value) -> logger & {
+    for (auto &sink_ptr_value : sinks()) {
+      sink_ptr_value->set_flush_on(level_value);
+    }
+    return *this;
   }
 
   // 通用日志入口：级别由调用方显式传入。
@@ -145,19 +187,19 @@ public:
                    std::source_location location =
                        std::source_location::current(),
                    bool force_source_location = false) {
-    if (level_value < level()) {
+    if (!should_log(level_value)) {
       return;
     }
 
+    const auto metadata = required_metadata();
     log_record record{
-        .logger_name = name_,
+        .logger_name = {},
+        .logger_name_ref = name_,
         .level = level_value,
-        .timestamp = std::chrono::system_clock::now(),
-        .thread_id = detail::current_thread_id(),
-        .process_id = detail::current_process_id(),
-        .location = location,
         .force_source_location = force_source_location,
         .message = std::move(message)};
+    apply_metadata(record, metadata);
+    apply_source_location(record, metadata, location, force_source_location);
 
     remember_backtrace(record);
     dispatch(record);
@@ -206,20 +248,22 @@ private:
   void log_with_location(log_level level_value, std::source_location location,
                          std::format_string<Args...> fmt, Args &&...args) {
     // 第一步：先做 logger 级别过滤，避免无意义的格式化开销。
-    if (level_value < level()) {
+    if (!should_log(level_value)) {
       return;
     }
 
     // 第二步：构造统一日志记录对象，把所有公共元信息一次性采齐。
+    const auto metadata = required_metadata();
     log_record record{
-        .logger_name = name_,
+        .logger_name = {},
+        .logger_name_ref = name_,
         .level = level_value,
-        .timestamp = std::chrono::system_clock::now(),
-        .thread_id = detail::current_thread_id(),
-        .process_id = detail::current_process_id(),
-        .location = location,
         .force_source_location = false,
-        .message = detail::format_message(fmt, std::forward<Args>(args)...)};
+        .message = metadata.message
+                       ? detail::format_message(fmt, std::forward<Args>(args)...)
+                       : std::string{}};
+    apply_metadata(record, metadata);
+    apply_source_location(record, metadata, location, false);
 
     // 第三步：若开启了 ring buffer，则先缓存一份最近日志。
     remember_backtrace(record);
@@ -229,8 +273,11 @@ private:
 
   // 将最近日志写入 ring buffer。
   void remember_backtrace(const log_record &record) {
+    if (!backtrace_enabled_.load(std::memory_order_acquire)) {
+      return;
+    }
     std::lock_guard lock(backtrace_mutex_);
-    if (!backtrace_enabled_ || backtrace_capacity_ == 0) {
+    if (backtrace_capacity_ == 0) {
       return;
     }
     if (backtrace_buffer_.size() >= backtrace_capacity_) {
@@ -239,21 +286,97 @@ private:
     backtrace_buffer_.push_back(record);
   }
 
+  [[nodiscard]] auto required_metadata() const -> record_metadata {
+    return decode_metadata(
+        required_metadata_bits_.load(std::memory_order_acquire));
+  }
+
+  [[nodiscard]] static auto
+  combine_required_metadata(const std::vector<sink_ptr> &sinks)
+      -> record_metadata {
+    record_metadata metadata{.message = false,
+                             .timestamp = false,
+                             .thread_id = false,
+                             .process_id = false,
+                             .source_location = false};
+    for (const auto &sink_ptr_value : sinks) {
+      const auto sink_metadata = sink_ptr_value->required_metadata();
+      metadata.message = metadata.message || sink_metadata.message;
+      metadata.timestamp = metadata.timestamp || sink_metadata.timestamp;
+      metadata.thread_id = metadata.thread_id || sink_metadata.thread_id;
+      metadata.process_id = metadata.process_id || sink_metadata.process_id;
+      metadata.source_location =
+          metadata.source_location || sink_metadata.source_location;
+    }
+    return metadata;
+  }
+
+  static void apply_metadata(log_record &record,
+                             const record_metadata &metadata) {
+    if (metadata.timestamp) {
+      record.timestamp = std::chrono::system_clock::now();
+    }
+    if (metadata.thread_id) {
+      record.thread_id = detail::current_thread_id();
+    }
+    if (metadata.process_id) {
+      record.process_id = detail::current_process_id();
+    }
+  }
+
+  static void apply_source_location(log_record &record,
+                                    const record_metadata &metadata,
+                                    std::source_location location,
+                                    bool force_source_location) {
+    if (metadata.source_location || force_source_location) {
+      record.location = location;
+    }
+  }
+
+  [[nodiscard]] static auto encode_metadata(const record_metadata &metadata)
+      -> unsigned {
+    return (metadata.message ? 0x1U : 0U) |
+           (metadata.timestamp ? 0x2U : 0U) |
+           (metadata.thread_id ? 0x4U : 0U) |
+           (metadata.process_id ? 0x8U : 0U) |
+           (metadata.source_location ? 0x10U : 0U);
+  }
+
+  [[nodiscard]] static auto decode_metadata(unsigned bits) -> record_metadata {
+    return {.message = (bits & 0x1U) != 0,
+            .timestamp = (bits & 0x2U) != 0,
+            .thread_id = (bits & 0x4U) != 0,
+            .process_id = (bits & 0x8U) != 0,
+            .source_location = (bits & 0x10U) != 0};
+  }
+
   // 将一条日志分发给所有 sink。
   void dispatch(const log_record &record) {
-    for (auto &sink_ptr_value : sinks()) {
+    if (single_sink_ != nullptr) {
+      single_sink_->log(record);
+      return;
+    }
+    const auto snapshot =
+        std::atomic_load_explicit(&sinks_snapshot_, std::memory_order_acquire);
+    if (snapshot == nullptr) {
+      return;
+    }
+    for (const auto &sink_ptr_value : *snapshot) {
       sink_ptr_value->log(record);
     }
   }
 
   std::string name_; // logger 名称。
-  mutable std::mutex sinks_mutex_; // 保护 sink 列表的互斥锁。
-  std::vector<sink_ptr> sinks_; // 当前绑定的输出目标集合。
+  mutable std::mutex sinks_mutex_; // 保护 sink 列表更新的互斥锁。
   std::atomic<log_level> level_{log_level::info}; // logger 自身的最小级别。
+  sink_ptr single_sink_; // 单 sink 热路径，避免每条日志读取 sink 快照。
+  std::atomic<unsigned> required_metadata_bits_{0x1fU}; // 当前 sink 集合需要的元数据。
+  std::shared_ptr<const std::vector<sink_ptr>>
+      sinks_snapshot_; // 写路径原子读取的 sink 快照。
   mutable std::mutex backtrace_mutex_; // 保护 ring buffer 的互斥锁。
   std::deque<log_record> backtrace_buffer_; // 保存最近日志的 ring buffer。
   std::size_t backtrace_capacity_{0}; // ring buffer 容量。
-  bool backtrace_enabled_{false}; // 是否启用了 ring buffer。
+  std::atomic<bool> backtrace_enabled_{false}; // 是否启用了 ring buffer。
 };
 
 // trace 自由函数包装，便于统一风格调用。

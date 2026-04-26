@@ -3,13 +3,16 @@
 #include "fastlog/detail/types.hpp"
 
 #include <concepts>
+#include <cctype>
 #include <ctime>
 #include <exception>
 #include <format>
 #include <functional>
+#include <optional>
 #include <source_location>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <thread>
 #include <type_traits>
 #include <utility>
@@ -48,6 +51,71 @@ inline auto level_to_string(log_level level) -> std::string_view {
   return "UNKNOWN";
 }
 
+// 将枚举级别转换为短文本，适合紧凑 pattern。
+inline auto level_to_short_string(log_level level) -> std::string_view {
+  switch (level) {
+  case log_level::trace:
+    return "T";
+  case log_level::debug:
+    return "D";
+  case log_level::info:
+    return "I";
+  case log_level::warn:
+    return "W";
+  case log_level::error:
+    return "E";
+  case log_level::fatal:
+    return "F";
+  case log_level::off:
+    return "O";
+  }
+  return "?";
+}
+
+// 解析文本日志级别。大小写不敏感，便于从配置文件接入。
+inline auto level_from_string(std::string_view text) -> std::optional<log_level> {
+  auto equal_ci = [](std::string_view lhs, std::string_view rhs) {
+    if (lhs.size() != rhs.size()) {
+      return false;
+    }
+    for (std::size_t i = 0; i < lhs.size(); ++i) {
+      const auto left = static_cast<unsigned char>(lhs[i]);
+      const auto right = static_cast<unsigned char>(rhs[i]);
+      if (std::tolower(left) != std::tolower(right)) {
+        return false;
+      }
+    }
+    return true;
+  };
+
+  if (equal_ci(text, "trace") || equal_ci(text, "t")) {
+    return log_level::trace;
+  }
+  if (equal_ci(text, "debug") || equal_ci(text, "d")) {
+    return log_level::debug;
+  }
+  if (equal_ci(text, "info") || equal_ci(text, "i")) {
+    return log_level::info;
+  }
+  if (equal_ci(text, "warn") || equal_ci(text, "warning") ||
+      equal_ci(text, "w")) {
+    return log_level::warn;
+  }
+  if (equal_ci(text, "error") || equal_ci(text, "err") ||
+      equal_ci(text, "e")) {
+    return log_level::error;
+  }
+  if (equal_ci(text, "fatal") || equal_ci(text, "critical") ||
+      equal_ci(text, "f")) {
+    return log_level::fatal;
+  }
+  if (equal_ci(text, "off") || equal_ci(text, "none") ||
+      equal_ci(text, "o")) {
+    return log_level::off;
+  }
+  return std::nullopt;
+}
+
 // 将日志级别转换为 ANSI 颜色码，控制台 sink 会使用这里的结果。
 inline auto level_color(log_level level) -> std::string_view {
   switch (level) {
@@ -74,17 +142,21 @@ inline auto reset_color() -> std::string_view { return "\033[0m"; }
 
 // 获取当前进程 ID，用于在多进程部署时区分日志来源。
 inline auto current_process_id() -> std::uint32_t {
+  static const auto pid = [] {
 #if defined(_WIN32)
-  return static_cast<std::uint32_t>(::GetCurrentProcessId());
+    return static_cast<std::uint32_t>(::GetCurrentProcessId());
 #else
-  return static_cast<std::uint32_t>(::getpid());
+    return static_cast<std::uint32_t>(::getpid());
 #endif
+  }();
+  return pid;
 }
 
 // 获取当前线程 ID，避免在热路径上直接格式化 std::thread::id。
 inline auto current_thread_id() -> std::uint64_t {
-  return static_cast<std::uint64_t>(
+  static thread_local const auto tid = static_cast<std::uint64_t>(
       std::hash<std::thread::id>{}(std::this_thread::get_id()));
+  return tid;
 }
 
 // 线程安全的本地时间转换。
@@ -119,7 +191,16 @@ inline auto normalize_path(std::string path) -> std::string {
 inline auto format_source_path(std::string_view file_name,
                                const format_config &config) -> std::string {
   if (config.source_path == source_path_mode::absolute) {
-    return std::string(file_name);
+    return normalize_path(std::string(file_name));
+  }
+  if (config.source_path == source_path_mode::relative &&
+      !config.source_root.empty()) {
+    std::error_code ec;
+    auto relative = std::filesystem::relative(
+        std::filesystem::path(file_name), config.source_root, ec);
+    if (!ec && !relative.empty()) {
+      return normalize_path(relative.generic_string());
+    }
   }
   const auto source = std::filesystem::path(file_name);
   return normalize_path(source.filename().generic_string());

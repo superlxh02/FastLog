@@ -6,6 +6,7 @@
 #include <memory>
 #include <source_location>
 #include <string>
+#include <string_view>
 
 namespace fastlog {
 
@@ -26,8 +27,9 @@ enum class time_mode { local, utc };
 
 // 源文件路径输出模式。
 // filename：只输出源文件名，不带路径。
-// absolute：输出编译器记录下来的完整绝对路径。
-enum class source_path_mode { filename, absolute };
+// relative：优先按 source_root 输出相对路径。
+// absolute：输出编译器记录下来的完整路径。
+enum class source_path_mode { filename, relative, absolute };
 
 // sink 的运行时统计信息。
 struct sink_stats {
@@ -36,6 +38,15 @@ struct sink_stats {
   std::uint64_t flushed_messages{0};  // 主动 flush 的累计次数。
   std::uint64_t current_queue_depth{0}; // 当前队列深度；同步 sink 恒为 0。
   std::uint64_t peak_queue_depth{0};    // 历史峰值队列深度；同步 sink 恒为 0。
+};
+
+// sink 声明自己实际需要 logger 前端采样哪些元数据。
+struct record_metadata {
+  bool message{true};
+  bool timestamp{true};
+  bool thread_id{true};
+  bool process_id{true};
+  bool source_location{true};
 };
 
 // formatter 和 sink 共享的格式化配置。
@@ -82,9 +93,9 @@ struct daily_file_sink_options : file_sink_options {
 // logger 前端构造出的统一日志记录对象。
 struct log_record {
   std::string logger_name; // 产生日志的 logger 名称。
+  std::string_view logger_name_ref{}; // logger 热路径使用的稳定名称引用。
   log_level level{log_level::info}; // 当前日志级别。
-  std::chrono::system_clock::time_point timestamp{
-      std::chrono::system_clock::now()}; // 采样时刻。
+  std::chrono::system_clock::time_point timestamp{}; // 采样时刻。
   std::uint64_t thread_id{0};            // 采样线程的 ID。
   std::uint32_t process_id{0};           // 采样进程的 ID。
   std::source_location location{};       // 调用点源码位置。

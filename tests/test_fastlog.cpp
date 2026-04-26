@@ -88,12 +88,15 @@ int main() {
   std::vector<std::string> logger_lines;
   std::vector<std::string> filename_lines;
   std::vector<std::string> absolute_lines;
+  std::vector<std::string> builder_lines;
+  std::vector<std::string> fanout_left_lines;
+  std::vector<std::string> fanout_right_lines;
 
   auto console_sink = fastlog::make_callback_sink([&](std::string_view line) {
     std::lock_guard lock(captured_mutex);
     console_lines.emplace_back(line);
   });
-  console_sink->set_pattern("%n|%l|%v");
+  console_sink->set_pattern("%n|%l|%v").set_flush_on(fastlog::log_level::fatal);
 
   auto default_logger = fastlog::create_logger(
       "console_capture", {console_sink}, fastlog::log_level::trace);
@@ -129,7 +132,7 @@ int main() {
 
   auto logger = fastlog::create_logger(
       "test_logger", {callback}, fastlog::log_level::trace);
-  logger->enable_backtrace(8);
+  logger->enable_backtrace(8).set_flush_on(fastlog::log_level::fatal);
   logger->info("hello {}", 42);
   logger->warn("warn line");
   logger->flush_backtrace();
@@ -139,24 +142,64 @@ int main() {
     std::lock_guard lock(captured_mutex);
     filename_lines.emplace_back(line);
   });
-  filename_sink->set_pattern("%s|%#|%v");
   auto filename_config = filename_sink->format_config_value();
   filename_config.source_path = fastlog::source_path_mode::filename;
-  filename_sink->set_format_config(filename_config);
+  filename_sink->set_pattern("%s|%#|%v").set_format_config(filename_config);
 
   auto absolute_sink = fastlog::make_callback_sink([&](std::string_view line) {
     std::lock_guard lock(captured_mutex);
     absolute_lines.emplace_back(line);
   });
-  absolute_sink->set_pattern("%s|%#|%v");
   auto absolute_config = absolute_sink->format_config_value();
   absolute_config.source_path = fastlog::source_path_mode::absolute;
-  absolute_sink->set_format_config(absolute_config);
+  absolute_sink->set_pattern("%s|%#|%v").set_format_config(absolute_config);
 
   auto path_logger = fastlog::create_logger(
       "path_logger", {filename_sink, absolute_sink}, fastlog::log_level::trace);
   path_logger->info("path check");
   path_logger->flush();
+
+  auto builder_sink = fastlog::make_callback_sink([&](std::string_view line) {
+    std::lock_guard lock(captured_mutex);
+    builder_lines.emplace_back(line);
+  });
+  auto built_logger =
+      fastlog::pipeline("built_logger")
+          .at(fastlog::log_level::trace)
+          .format_as("%n|%L|%@|%!|%u|%v")
+          .source(fastlog::source_path_mode::relative,
+                  std::filesystem::current_path())
+          .write_to(builder_sink)
+          .install();
+  built_logger->info("builder path");
+  built_logger->flush();
+
+  auto fanout_left = fastlog::make_callback_sink([&](std::string_view line) {
+    std::lock_guard lock(captured_mutex);
+    fanout_left_lines.emplace_back(line);
+  });
+  auto fanout_right = fastlog::make_callback_sink([&](std::string_view line) {
+    std::lock_guard lock(captured_mutex);
+    fanout_right_lines.emplace_back(line);
+  });
+  fanout_left->set_pattern("%v");
+  fanout_right->set_pattern("%l|%v");
+  auto fanout_sink =
+      fastlog::make_fanout_sink({fanout_left, fanout_right});
+  auto fanout_logger = fastlog::create_logger(
+      "fanout_logger", {fanout_sink}, fastlog::log_level::trace);
+  fanout_logger->warn("fanout works");
+  fanout_logger->flush();
+
+  auto null_sink = fastlog::make_null_sink();
+  auto null_logger = fastlog::create_logger(
+      "null_logger", {null_sink}, fastlog::log_level::trace);
+  null_logger->info("null {}", 1);
+  null_logger->flush();
+  assert(null_sink->stats().enqueued_messages == 1);
+  assert(null_sink->stats().flushed_messages == 1);
+  assert(fastlog::parse_level("warning") == fastlog::log_level::warn);
+  assert(fastlog::to_short_string(fastlog::log_level::error) == "E");
 
   auto basic_sink = fastlog::make_basic_file_sink("logs/basic.log");
   auto basic_logger = fastlog::create_logger(
@@ -197,13 +240,12 @@ int main() {
       .async_write = true};
   auto simple_file_logger =
       fastlog::file::make_logger("simple_file", "logs/simple_file.log", simple_options);
-  fastlog::file::set_level(simple_file_logger, fastlog::log_level::trace);
-  fastlog::file::set_detail_mode(simple_file_logger, fastlog::detail_mode::full);
-  fastlog::file::set_source_path_mode(
-      simple_file_logger,
-      fastlog::source_path_mode::absolute,
-      std::filesystem::current_path());
-  fastlog::file::set_max_file_size(simple_file_logger, 1024 * 64);
+  simple_file_logger.set_level(fastlog::log_level::trace)
+      .set_detail_mode(fastlog::detail_mode::full)
+      .set_source_path_mode(fastlog::source_path_mode::absolute,
+                            std::filesystem::current_path())
+      .set_max_file_size(1024 * 64)
+      .set_flush_on(fastlog::log_level::error);
   simple_file_logger.info("simple facade works");
   fastlog::file::flush(simple_file_logger);
   const auto simple_lookup = fastlog::file::get_logger("simple_file");
@@ -217,7 +259,8 @@ int main() {
   fastlog::file::flush(simple_file_logger);
 
   auto level_filtered_sink = fastlog::make_callback_sink([](std::string_view) {});
-  level_filtered_sink->set_level(fastlog::log_level::error);
+  level_filtered_sink->set_level(fastlog::log_level::error)
+      .set_flush_on(fastlog::log_level::fatal);
   auto level_logger = fastlog::create_logger(
       "level_logger", {level_filtered_sink}, fastlog::log_level::trace);
   level_logger->info("filtered");
@@ -291,6 +334,7 @@ int main() {
     flusher.join();
     probe_logger->flush();
     assert(max_inflight.load() == 1);
+    fastlog::drop_logger("probe_logger");
   }
 
   {
@@ -372,6 +416,35 @@ int main() {
                                        0) == 0);
     assert(absolute_lines.back().find("/Users/lxh/workspace/cpp/FastLog/tests/test_fastlog.cpp") !=
            std::string::npos);
+    assert(!builder_lines.empty());
+    auto found_builder_line = false;
+    for (const auto &line : builder_lines) {
+      if (line.find("built_logger|I|") != std::string::npos &&
+          line.find("test_fastlog.cpp:") != std::string::npos &&
+          line.find("builder path") != std::string::npos) {
+        found_builder_line = true;
+        break;
+      }
+    }
+    assert(found_builder_line);
+    assert(!fanout_left_lines.empty());
+    assert(!fanout_right_lines.empty());
+    auto found_fanout_left = false;
+    for (const auto &line : fanout_left_lines) {
+      if (line == "fanout works") {
+        found_fanout_left = true;
+        break;
+      }
+    }
+    auto found_fanout_right = false;
+    for (const auto &line : fanout_right_lines) {
+      if (line.find("WARN|fanout works") != std::string::npos) {
+        found_fanout_right = true;
+        break;
+      }
+    }
+    assert(found_fanout_left);
+    assert(found_fanout_right);
   }
 
   auto daily_found = false;
@@ -399,6 +472,9 @@ int main() {
   fastlog::drop_logger("console_style");
   fastlog::drop_logger("probe_logger");
   fastlog::drop_logger("callback_logger");
+  fastlog::drop_logger("built_logger");
+  fastlog::drop_logger("fanout_logger");
+  fastlog::drop_logger("null_logger");
 
   return 0;
 }

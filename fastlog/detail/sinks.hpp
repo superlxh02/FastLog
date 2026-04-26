@@ -12,12 +12,106 @@
 #include <iostream>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <ostream>
 #include <print>
 #include <system_error>
 #include <thread>
+#include <vector>
 
 namespace fastlog {
+
+// 空 sink。
+// 用于基准测试、按需禁用输出，或只测量 logger 前端格式化成本。
+class null_sink final : public sink {
+public:
+  void log(const log_record &record) override {
+    if (record.level < level()) {
+      return;
+    }
+    record_enqueue();
+    if (record.level >= flush_on()) {
+      flush();
+    }
+  }
+
+  [[nodiscard]] auto required_metadata() const -> record_metadata override {
+    return {.message = false,
+            .timestamp = false,
+            .thread_id = false,
+            .process_id = false,
+            .source_location = false};
+  }
+
+private:
+  void sink_it(const std::string &) override {}
+};
+
+// 分发 sink。
+// 把多个 sink 包装成一个输出管道，便于复用相同的异步策略或统一注册。
+class fanout_sink final : public sink {
+public:
+  explicit fanout_sink(std::vector<sink_ptr> sinks) : sinks_(std::move(sinks)) {}
+
+  auto add_sink(sink_ptr sink_ptr_value) -> fanout_sink & {
+    std::lock_guard lock(sinks_mutex_);
+    sinks_.push_back(std::move(sink_ptr_value));
+    return *this;
+  }
+
+  [[nodiscard]] auto sinks() const -> std::vector<sink_ptr> {
+    std::lock_guard lock(sinks_mutex_);
+    return sinks_;
+  }
+
+  [[nodiscard]] auto required_metadata() const -> record_metadata override {
+    record_metadata metadata{.message = false,
+                             .timestamp = false,
+                             .thread_id = false,
+                             .process_id = false,
+                             .source_location = false};
+    for (const auto &sink_ptr_value : sinks()) {
+      const auto sink_metadata = sink_ptr_value->required_metadata();
+      metadata.message = metadata.message || sink_metadata.message;
+      metadata.timestamp = metadata.timestamp || sink_metadata.timestamp;
+      metadata.thread_id = metadata.thread_id || sink_metadata.thread_id;
+      metadata.process_id = metadata.process_id || sink_metadata.process_id;
+      metadata.source_location =
+          metadata.source_location || sink_metadata.source_location;
+    }
+    return metadata;
+  }
+
+  void log(const log_record &record) override {
+    if (record.level < level()) {
+      return;
+    }
+    record_enqueue();
+    for (const auto &sink_ptr_value : sinks()) {
+      try {
+        sink_ptr_value->log(record);
+      } catch (...) {
+        record_drop();
+      }
+    }
+    if (record.level >= flush_on()) {
+      flush();
+    }
+  }
+
+  void flush() override {
+    for (const auto &sink_ptr_value : sinks()) {
+      sink_ptr_value->flush();
+    }
+    sink::flush();
+  }
+
+private:
+  void sink_it(const std::string &) override {}
+
+  mutable std::mutex sinks_mutex_;
+  std::vector<sink_ptr> sinks_;
+};
 
 // 控制台/任意 ostream sink。
 class stream_sink final : public sink {
@@ -131,9 +225,10 @@ public:
   }
 
   // 动态调整单文件最大大小。
-  void set_max_file_size(std::size_t max_file_size) {
+  auto set_max_file_size(std::size_t max_file_size) -> rotating_file_sink & {
     std::lock_guard lock(file_mutex_);
     options_.max_file_size = max_file_size;
+    return *this;
   }
 
   // 获取当前单文件最大大小。
@@ -315,6 +410,7 @@ public:
   // 构造时绑定一个真实 sink，并立即启动后台工作线程。
   async_sink(sink_ptr inner_sink, async_options options = {})
       : inner_sink_(std::move(inner_sink)), options_(options),
+        queue_(std::max<std::size_t>(std::size_t{1}, options_.queue_size)),
         worker_(&async_sink::run, this) {}
 
   // 析构时保证后台线程被安全回收。
@@ -329,6 +425,11 @@ public:
     base.current_queue_depth = current_queue_depth_.load(std::memory_order_relaxed);
     base.peak_queue_depth = peak_queue_depth_.load(std::memory_order_relaxed);
     return base;
+  }
+
+  [[nodiscard]] auto required_metadata() const -> record_metadata override {
+    std::lock_guard lock(inner_sink_mutex_);
+    return inner_sink_->required_metadata();
   }
 
   // 异步写入入口。
@@ -346,18 +447,21 @@ public:
       // block 策略：队列满了就等待消费者释放空间。
       if (options_.policy == overflow_policy::block) {
         queue_not_full_.wait(lock, [this] {
-          return shutdown_requested_ || queue_.size() < options_.queue_size;
+          return shutdown_requested_ || queue_size_ < queue_.size();
         });
-      } else if (queue_.size() >= options_.queue_size) {
+      } else if (queue_size_ >= queue_.size()) {
         // drop_new 策略：直接丢弃当前这条新日志。
         if (options_.policy == overflow_policy::drop_new) {
           record_drop();
           return;
         }
         // drop_oldest 策略：先丢最老的一条，再接纳新日志。
-        if (options_.policy == overflow_policy::drop_oldest && !queue_.empty()) {
-          queue_.pop_front();
+        if (options_.policy == overflow_policy::drop_oldest && queue_size_ > 0) {
+          queue_[queue_head_].reset();
+          queue_head_ = (queue_head_ + 1) % queue_.size();
+          --queue_size_;
           record_drop();
+          completed_sequence_.fetch_add(1, std::memory_order_relaxed);
         }
       }
 
@@ -367,13 +471,15 @@ public:
       }
 
       // 真正把日志放入队列。
-      queue_.push_back(record);
+      const auto tail = (queue_head_ + queue_size_) % queue_.size();
+      queue_[tail] = record;
+      ++queue_size_;
       // 更新统计，表示已经成功进入异步队列。
       record_enqueue();
-      current_queue_depth_.store(queue_.size(), std::memory_order_relaxed);
+      current_queue_depth_.store(queue_size_, std::memory_order_relaxed);
       peak_queue_depth_.store(
           std::max<std::uint64_t>(peak_queue_depth_.load(std::memory_order_relaxed),
-                                  static_cast<std::uint64_t>(queue_.size())),
+                                  static_cast<std::uint64_t>(queue_size_)),
           std::memory_order_relaxed);
       submitted_sequence_.fetch_add(1, std::memory_order_relaxed);
     }
@@ -398,7 +504,7 @@ public:
       queue_drained_.wait(lock, [this, target_sequence] {
         return completed_sequence_.load(std::memory_order_relaxed) >=
                    target_sequence &&
-               queue_.empty();
+               queue_size_ == 0;
       });
     }
     std::lock_guard lock(inner_sink_mutex_);
@@ -444,22 +550,31 @@ private:
         std::chrono::steady_clock::now() + options_.flush_interval;
     for (;;) {
       // 后台线程每轮都先准备一个本地批次，减少锁内工作。
-      std::deque<log_record> batch;
+      std::vector<log_record> batch;
       {
         // 加锁后统一检查“有新日志”或“需要退出/flush”的状态。
         std::unique_lock lock(queue_mutex_);
         queue_not_empty_.wait_until(lock, next_flush_deadline, [this] {
-          return shutdown_requested_.load() || !queue_.empty();
+          return shutdown_requested_.load() || queue_size_ > 0;
         });
 
         // 若收到 shutdown 且队列为空，说明可以安全退出主循环。
-        if (queue_.empty() && shutdown_requested_) {
+        if (queue_size_ == 0 && shutdown_requested_) {
           break;
         }
 
-        // 把共享队列整体搬到本地变量，减少后续持锁时间。
-        batch.swap(queue_);
-        current_queue_depth_.store(queue_.size(), std::memory_order_relaxed);
+        // 把共享队列搬到本地批次，减少后续持锁时间。
+        batch.reserve(queue_size_);
+        while (queue_size_ > 0) {
+          auto &slot = queue_[queue_head_];
+          if (slot.has_value()) {
+            batch.push_back(std::move(*slot));
+            slot.reset();
+          }
+          queue_head_ = (queue_head_ + 1) % queue_.size();
+          --queue_size_;
+        }
+        current_queue_depth_.store(queue_size_, std::memory_order_relaxed);
         // 释放了队列空间后，通知可能阻塞中的生产者线程继续写入。
         queue_not_full_.notify_all();
       }
@@ -487,11 +602,20 @@ private:
     }
 
     // 主循环退出后，再把尾部残留日志做一次兜底消费。
-    std::deque<log_record> tail;
+    std::vector<log_record> tail;
     {
       std::lock_guard lock(queue_mutex_);
-      tail.swap(queue_);
-      current_queue_depth_.store(queue_.size(), std::memory_order_relaxed);
+      tail.reserve(queue_size_);
+      while (queue_size_ > 0) {
+        auto &slot = queue_[queue_head_];
+        if (slot.has_value()) {
+          tail.push_back(std::move(*slot));
+          slot.reset();
+        }
+        queue_head_ = (queue_head_ + 1) % queue_.size();
+        --queue_size_;
+      }
+      current_queue_depth_.store(queue_size_, std::memory_order_relaxed);
       queue_not_full_.notify_all();
     }
     for (const auto &record : tail) {
@@ -506,9 +630,11 @@ private:
   }
 
   sink_ptr inner_sink_; // 真正执行 I/O 的下游 sink。
-  std::mutex inner_sink_mutex_; // 串行化对下游 sink 的 log/flush 调用。
+  mutable std::mutex inner_sink_mutex_; // 串行化对下游 sink 的 log/flush 调用。
   async_options options_; // 异步队列和刷新策略配置。
-  std::deque<log_record> queue_; // 前后端共享的有界消息队列。
+  std::vector<std::optional<log_record>> queue_; // 预分配有界环形队列。
+  std::size_t queue_head_{0}; // 下一条待消费记录的位置。
+  std::size_t queue_size_{0}; // 当前环形队列中的记录数。
   std::mutex queue_mutex_; // 保护队列状态的互斥锁。
   std::condition_variable queue_not_empty_; // 通知后台线程“队列里有新日志”。
   std::condition_variable queue_not_full_; // 通知前端线程“队列里腾出了空位”。
@@ -537,6 +663,14 @@ inline auto make_stderr_sink() -> sink_ptr {
   config.colorize = true;
   sink_ptr_value->set_format_config(config);
   return sink_ptr_value;
+}
+
+// 创建空 sink。
+inline auto make_null_sink() -> sink_ptr { return std::make_shared<null_sink>(); }
+
+// 创建分发 sink。
+inline auto make_fanout_sink(std::vector<sink_ptr> sinks) -> sink_ptr {
+  return std::make_shared<fanout_sink>(std::move(sinks));
 }
 
 // 创建基础文件 sink。

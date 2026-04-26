@@ -25,7 +25,7 @@ auto build_app_logger() -> fastlog::logger_ptr {
   fastlog::detail::apply_detail_mode_preset(&file_config,
                                             fastlog::detail_mode::full);
   file_config.source_root = std::filesystem::current_path();
-  file_sink->set_format_config(file_config);
+  file_sink->set_format_config(file_config).set_flush_on(fastlog::log_level::error);
 
   auto async_file_sink = fastlog::make_async_sink(
       file_sink,
@@ -35,7 +35,7 @@ auto build_app_logger() -> fastlog::logger_ptr {
 
   auto logger = fastlog::create_logger(
       "advanced_app", {console_sink, async_file_sink}, fastlog::log_level::trace);
-  logger->enable_backtrace(32);
+  logger->enable_backtrace(32).set_flush_on(fastlog::log_level::error);
   return logger;
 }
 

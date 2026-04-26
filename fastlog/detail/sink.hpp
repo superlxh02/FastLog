@@ -5,6 +5,7 @@
 #include <atomic>
 #include <memory>
 #include <mutex>
+#include <utility>
 
 namespace fastlog {
 
@@ -16,7 +17,10 @@ public:
   virtual ~sink() = default;
 
   // 设置该 sink 的最小接收级别。
-  void set_level(log_level level) { level_.store(level, std::memory_order_relaxed); }
+  auto set_level(log_level level) -> sink & {
+    level_.store(level, std::memory_order_relaxed);
+    return *this;
+  }
 
   // 读取该 sink 的最小接收级别。
   [[nodiscard]] auto level() const -> log_level {
@@ -24,8 +28,9 @@ public:
   }
 
   // 设置触发自动 flush 的级别阈值。
-  void set_flush_on(log_level level) {
+  auto set_flush_on(log_level level) -> sink & {
     flush_on_.store(level, std::memory_order_relaxed);
+    return *this;
   }
 
   // 读取自动 flush 阈值。
@@ -34,27 +39,39 @@ public:
   }
 
   // 使用内置 pattern_formatter 替换当前 formatter。
-  void set_pattern(std::string pattern) {
+  auto set_pattern(std::string pattern) -> sink & {
     std::lock_guard lock(mutex_);
-    formatter_ = std::make_shared<pattern_formatter>(std::move(pattern));
+    const auto current =
+        std::atomic_load_explicit(&format_state_, std::memory_order_acquire);
+    publish_format_state(
+        std::make_shared<pattern_formatter>(std::move(pattern)),
+        current->config);
+    return *this;
   }
 
   // 注入自定义 formatter。
-  void set_formatter(std::shared_ptr<formatter> formatter_ptr) {
+  auto set_formatter(std::shared_ptr<formatter> formatter_ptr) -> sink & {
     std::lock_guard lock(mutex_);
-    formatter_ = std::move(formatter_ptr);
+    const auto current =
+        std::atomic_load_explicit(&format_state_, std::memory_order_acquire);
+    publish_format_state(std::move(formatter_ptr), current->config);
+    return *this;
   }
 
   // 更新格式化配置。
-  void set_format_config(format_config config) {
+  auto set_format_config(format_config config) -> sink & {
     std::lock_guard lock(mutex_);
-    format_config_ = config;
+    const auto current =
+        std::atomic_load_explicit(&format_state_, std::memory_order_acquire);
+    publish_format_state(current->formatter, std::move(config));
+    return *this;
   }
 
   // 读取当前格式化配置。
   [[nodiscard]] auto format_config_value() const -> format_config {
-    std::lock_guard lock(mutex_);
-    return format_config_;
+    const auto state =
+        std::atomic_load_explicit(&format_state_, std::memory_order_acquire);
+    return state->config;
   }
 
   // 获取运行时统计快照。
@@ -65,6 +82,11 @@ public:
         .flushed_messages = flushed_messages_.load(std::memory_order_relaxed),
         .current_queue_depth = 0,
         .peak_queue_depth = 0};
+  }
+
+  // 声明该 sink 需要 logger 前端采样哪些元数据。
+  [[nodiscard]] virtual auto required_metadata() const -> record_metadata {
+    return {};
   }
 
   // sink 的统一写入入口。
@@ -87,14 +109,9 @@ public:
 protected:
   // 调用当前 formatter，把 record 渲染为文本。
   [[nodiscard]] auto render(const log_record &record) const -> std::string {
-    std::shared_ptr<formatter> formatter_ptr;
-    format_config config;
-    {
-      std::lock_guard lock(mutex_);
-      formatter_ptr = formatter_;
-      config = format_config_;
-    }
-    return formatter_ptr->format(record, config);
+    const auto state =
+        std::atomic_load_explicit(&format_state_, std::memory_order_acquire);
+    return state->formatter->format(record, state->config);
   }
 
   // 记录一次消息被丢弃。
@@ -113,12 +130,27 @@ protected:
   }
 
 private:
+  struct format_state {
+    std::shared_ptr<formatter> formatter;
+    format_config config;
+  };
+
+  void publish_format_state(std::shared_ptr<formatter> formatter_ptr,
+                            format_config config) {
+    auto next = std::make_shared<const format_state>(
+        std::move(formatter_ptr), std::move(config));
+    std::atomic_store_explicit(&format_state_, std::move(next),
+                               std::memory_order_release);
+  }
+
   // 具体 sink 的实际输出逻辑，由派生类实现。
   virtual void sink_it(const std::string &rendered) = 0;
 
-  mutable std::mutex mutex_; // 保护 formatter 和 format_config 的互斥锁。
-  std::shared_ptr<formatter> formatter_{std::make_shared<pattern_formatter>()}; // 当前使用的 formatter。
-  format_config format_config_{}; // 当前使用的格式化配置。
+  mutable std::mutex mutex_; // 串行化 formatter 和 format_config 的发布。
+  std::shared_ptr<const format_state> format_state_{
+      std::make_shared<const format_state>(
+          std::make_shared<pattern_formatter>(),
+          format_config{})}; // 当前使用的 formatter/config 快照。
   std::atomic<log_level> level_{log_level::trace}; // sink 的最小接收级别。
   std::atomic<log_level> flush_on_{log_level::fatal}; // 自动触发 flush 的级别阈值。
   std::atomic<std::uint64_t> enqueued_messages_{0}; // 进入 sink 的消息总数。

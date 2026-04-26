@@ -112,13 +112,15 @@ enum class time_mode { local, utc };
 定义：
 
 ```cpp
-enum class source_path_mode { filename, absolute };
+enum class source_path_mode { filename, relative, absolute };
 ```
 
 枚举项说明：
 
 - `filename`
   仅输出文件名和行号。
+- `relative`
+  优先按 `format_config::source_root` 输出相对路径。
 - `absolute`
   输出绝对路径和行号。
 
@@ -386,7 +388,7 @@ inline const console_facade console{};
 
 返回值：
 
-- 无返回值。
+- 返回当前 `sink`，可继续链式配置。
 
 示例：
 
@@ -551,7 +553,7 @@ logger.info("file logger ready");
 - 找到时返回有效句柄。
 - 未找到时返回空句柄，可通过 `if (logger)` 判断。
 
-### `fastlog::file::set_level(const FileLogger& logger_ref, log_level level)`
+### `fastlog::file::set_level(const FileLogger& logger_ref, log_level level) -> const FileLogger&`
 
 功能说明：设置文件 logger 的最小日志级别。
 
@@ -564,9 +566,9 @@ logger.info("file logger ready");
 
 返回值：
 
-- 无返回值。
+- 返回 `logger_ref`，可继续链式配置。
 
-### `fastlog::file::set_detail_mode(const FileLogger& logger_ref, detail_mode mode)`
+### `fastlog::file::set_detail_mode(const FileLogger& logger_ref, detail_mode mode) -> const FileLogger&`
 
 功能说明：设置文件 logger 的输出 detail 模式。
 
@@ -579,9 +581,9 @@ logger.info("file logger ready");
 
 返回值：
 
-- 无返回值。
+- 返回 `logger_ref`，可继续链式配置。
 
-### `fastlog::file::set_source_path_mode(const FileLogger& logger_ref, source_path_mode mode, std::filesystem::path source_root = {})`
+### `fastlog::file::set_source_path_mode(const FileLogger& logger_ref, source_path_mode mode, std::filesystem::path source_root = {}) -> const FileLogger&`
 
 功能说明：设置文件 logger 的源码位置输出模式。
 
@@ -592,13 +594,13 @@ logger.info("file logger ready");
 - `mode`
   源码路径模式。
 - `source_root`
-  保留参数。当前公开模式不依赖它。
+  `relative` 模式下用于裁剪源码路径的基准目录。
 
 返回值：
 
-- 无返回值。
+- 返回 `logger_ref`，可继续链式配置。
 
-### `fastlog::file::set_max_file_size(const FileLogger& logger_ref, std::size_t max_file_size)`
+### `fastlog::file::set_max_file_size(const FileLogger& logger_ref, std::size_t max_file_size) -> const FileLogger&`
 
 功能说明：动态调整轮转文件大小阈值。
 
@@ -611,7 +613,7 @@ logger.info("file logger ready");
 
 返回值：
 
-- 无返回值。
+- 返回 `logger_ref`，可继续链式配置。
 
 ### `fastlog::file::flush(const FileLogger& logger_ref)`
 
@@ -632,7 +634,7 @@ logger.info("file logger ready");
 
 > 高级接口入口：适合需要多 sink、自定义组合、backtrace 或按对象管理日志器的场景。
 
-### `logger::set_level(log_level level)`
+### `logger::set_level(log_level level) -> logger&`
 
 功能说明：设置 logger 自身的最小日志级别。
 
@@ -643,7 +645,7 @@ logger.info("file logger ready");
 
 返回值：
 
-- 无返回值。
+- 返回当前 `logger`，可继续链式配置。
 
 ### `logger::level() const -> log_level`
 
@@ -669,7 +671,7 @@ logger.info("file logger ready");
 
 - 返回 logger 名称引用。
 
-### `logger::set_sinks(std::vector<sink_ptr> sinks)`
+### `logger::set_sinks(std::vector<sink_ptr> sinks) -> logger&`
 
 功能说明：整体替换当前 logger 绑定的 sink 列表。
 
@@ -680,9 +682,9 @@ logger.info("file logger ready");
 
 返回值：
 
-- 无返回值。
+- 返回当前 `logger`，可继续链式配置。
 
-### `logger::add_sink(sink_ptr sink_ptr_value)`
+### `logger::add_sink(sink_ptr sink_ptr_value) -> logger&`
 
 功能说明：追加一个新的 sink。
 
@@ -693,7 +695,7 @@ logger.info("file logger ready");
 
 返回值：
 
-- 无返回值。
+- 返回当前 `logger`，可继续链式配置。
 
 ### `logger::sinks() const -> std::vector<sink_ptr>`
 
@@ -707,7 +709,7 @@ logger.info("file logger ready");
 
 - 返回当前绑定 sink 的快照副本。
 
-### `logger::enable_backtrace(std::size_t capacity)`
+### `logger::enable_backtrace(std::size_t capacity) -> logger&`
 
 功能说明：开启 backtrace ring buffer。
 
@@ -718,9 +720,9 @@ logger.info("file logger ready");
 
 返回值：
 
-- 无返回值。
+- 返回当前 `logger`，可继续链式配置。
 
-### `logger::disable_backtrace()`
+### `logger::disable_backtrace() -> logger&`
 
 功能说明：关闭 backtrace ring buffer 并清空已缓存内容。
 
@@ -730,7 +732,7 @@ logger.info("file logger ready");
 
 返回值：
 
-- 无返回值。
+- 返回当前 `logger`，可继续链式配置。
 
 ### `logger::flush_backtrace()`
 
@@ -755,6 +757,19 @@ logger.info("file logger ready");
 返回值：
 
 - 无返回值。
+
+### `logger::set_flush_on(log_level level) -> logger&`
+
+功能说明：设置当前所有 sink 的自动 flush 阈值。
+
+参数说明：
+
+- `level`
+  flush 阈值。
+
+返回值：
+
+- 返回当前 `logger`，可继续链式配置。
 
 ### `logger::log(log_level level_value, fmt, args...)`
 
@@ -882,7 +897,7 @@ log_fatal(logger_ref, fmt, args...);
 
 > 输出抽象层：适合需要自定义格式、级别、flush 策略和下游目标的场景。
 
-### `sink::set_level(log_level level)`
+### `sink::set_level(log_level level) -> sink&`
 
 功能说明：设置 sink 自身的最小接收级别。
 
@@ -893,7 +908,7 @@ log_fatal(logger_ref, fmt, args...);
 
 返回值：
 
-- 无返回值。
+- 返回当前 `sink`，可继续链式配置。
 
 ### `sink::level() const -> log_level`
 
@@ -907,7 +922,7 @@ log_fatal(logger_ref, fmt, args...);
 
 - 当前 sink 级别。
 
-### `sink::set_flush_on(log_level level)`
+### `sink::set_flush_on(log_level level) -> sink&`
 
 功能说明：设置自动触发 flush 的级别阈值。
 
@@ -918,7 +933,7 @@ log_fatal(logger_ref, fmt, args...);
 
 返回值：
 
-- 无返回值。
+- 返回当前 `sink`，可继续链式配置。
 
 ### `sink::flush_on() const -> log_level`
 
@@ -932,9 +947,21 @@ log_fatal(logger_ref, fmt, args...);
 
 - 当前 flush 阈值。
 
-### `sink::set_pattern(std::string pattern)`
+### `sink::set_pattern(std::string pattern) -> sink&`
 
 功能说明：使用内置 `pattern_formatter` 设置输出 pattern。
+
+常用占位符：
+
+- `%v`：日志正文。
+- `%l` / `%L`：完整级别 / 短级别。
+- `%n`：logger 名称。
+- `%t` / `%P`：线程 ID / 进程 ID。
+- `%s` / `%g` / `%@`：按配置输出源码文件 / 原始源码路径 / 源码位置。
+- `%#` / `%!` / `%u`：行号 / 函数名 / 列号。
+- `%Y` / `%D` / `%H:%M:%S` / `%e` / `%f` / `%z`：完整时间戳、日期、时分秒、毫秒、微秒、时区偏移。
+- `%^` / `%$`：彩色输出起止标记。
+- `%%`：字面量 `%`。
 
 参数说明：
 
@@ -943,9 +970,9 @@ log_fatal(logger_ref, fmt, args...);
 
 返回值：
 
-- 无返回值。
+- 返回当前 `sink`，可继续链式配置。
 
-### `sink::set_formatter(std::shared_ptr<formatter> formatter_ptr)`
+### `sink::set_formatter(std::shared_ptr<formatter> formatter_ptr) -> sink&`
 
 功能说明：注入自定义 formatter。
 
@@ -956,9 +983,9 @@ log_fatal(logger_ref, fmt, args...);
 
 返回值：
 
-- 无返回值。
+- 返回当前 `sink`，可继续链式配置。
 
-### `sink::set_format_config(format_config config)`
+### `sink::set_format_config(format_config config) -> sink&`
 
 功能说明：整体更新格式配置。
 
@@ -969,7 +996,7 @@ log_fatal(logger_ref, fmt, args...);
 
 返回值：
 
-- 无返回值。
+- 返回当前 `sink`，可继续链式配置。
 
 ### `sink::format_config_value() const -> format_config`
 
@@ -1043,6 +1070,31 @@ log_fatal(logger_ref, fmt, args...);
 参数说明：
 
 - 无。
+
+返回值：
+
+- 返回 `sink_ptr`。
+
+### `make_null_sink() -> sink_ptr`
+
+功能说明：创建一个丢弃所有输出的 sink，常用于基准测试或临时禁用输出。
+
+参数说明：
+
+- 无。
+
+返回值：
+
+- 返回 `sink_ptr`。
+
+### `make_fanout_sink(std::vector<sink_ptr> sinks) -> sink_ptr`
+
+功能说明：创建一个分发 sink，把一条日志转发给多个下游 sink。
+
+参数说明：
+
+- `sinks`
+  下游 sink 集合。
 
 返回值：
 
@@ -1141,6 +1193,40 @@ log_fatal(logger_ref, fmt, args...);
 返回值：
 
 - 返回 `logger_ptr`。
+
+### `pipeline(std::string name) -> logger_builder`
+
+功能说明：创建链式 logger 构造器，用独立的零宏 API 组合级别、pattern、sink、异步包装和源码路径策略。
+
+常用链式成员：
+
+```cpp
+fastlog::pipeline("app")
+    .at(fastlog::log_level::trace)
+    .format_as("%Y [%^%L%$] [%n] [%@] %v")
+    .source(fastlog::source_path_mode::relative, std::filesystem::current_path())
+    .write_to(fastlog::make_stdout_sink())
+    .write_to_async(fastlog::make_rotating_file_sink("logs/app.log"))
+    .install();
+```
+
+返回值：
+
+- `make()`：只构造 logger，不注册。
+- `install()`：构造并注册命名 logger。
+- `install_as_default()`：构造、注册并设为默认 logger。
+
+### `parse_level(std::string_view text) -> std::optional<log_level>`
+
+功能说明：解析大小写不敏感的日志级别文本。
+
+### `to_string(log_level level) -> std::string_view`
+
+功能说明：返回完整级别文本。
+
+### `to_short_string(log_level level) -> std::string_view`
+
+功能说明：返回短级别文本。
 
 ### `get_logger(std::string_view name) -> logger_ptr`
 

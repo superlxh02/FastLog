@@ -3,7 +3,9 @@
 #include "fastlog/detail/logger.hpp"
 #include "fastlog/detail/sinks.hpp"
 
+#include <filesystem>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -147,6 +149,175 @@ private:
   logger_ptr default_logger_; // 默认 logger。
   logger_ptr console_logger_; // 独立控制台 logger。
 };
+
+// 独立风格的 logger 管线构造器。
+// 目标是用可读的链式 API 组合 sink、pattern、级别和异步包装，而不引入宏。
+class logger_builder {
+public:
+  explicit logger_builder(std::string name) : name_(std::move(name)) {}
+
+  auto at(log_level level) -> logger_builder & {
+    level_ = level;
+    return *this;
+  }
+
+  auto write_to(sink_ptr sink_ptr_value) -> logger_builder & {
+    if (sink_ptr_value == nullptr) {
+      return *this;
+    }
+    apply_sink_defaults(*sink_ptr_value);
+    sinks_.push_back(std::move(sink_ptr_value));
+    return *this;
+  }
+
+  auto write_to_async(sink_ptr sink_ptr_value, async_options options = {})
+      -> logger_builder & {
+    if (sink_ptr_value == nullptr) {
+      return *this;
+    }
+    apply_sink_defaults(*sink_ptr_value);
+    sinks_.push_back(make_async_sink(std::move(sink_ptr_value), options));
+    return *this;
+  }
+
+  auto fanout(std::vector<sink_ptr> sinks) -> logger_builder & {
+    for (const auto &sink_ptr_value : sinks) {
+      if (sink_ptr_value != nullptr) {
+        apply_sink_defaults(*sink_ptr_value);
+      }
+    }
+    sinks_.push_back(make_fanout_sink(std::move(sinks)));
+    return *this;
+  }
+
+  auto format_as(std::string pattern) -> logger_builder & {
+    pattern_ = std::move(pattern);
+    for (const auto &sink_ptr_value : sinks_) {
+      sink_ptr_value->set_pattern(*pattern_);
+    }
+    return *this;
+  }
+
+  auto detail(detail_mode mode) -> logger_builder & {
+    detail_ = mode;
+    for (const auto &sink_ptr_value : sinks_) {
+      auto config = sink_ptr_value->format_config_value();
+      detail::apply_detail_mode_preset(&config, mode);
+      sink_ptr_value->set_format_config(config);
+    }
+    return *this;
+  }
+
+  auto clock(time_mode mode) -> logger_builder & {
+    clock_mode_ = mode;
+    for (const auto &sink_ptr_value : sinks_) {
+      auto config = sink_ptr_value->format_config_value();
+      config.clock_mode = mode;
+      sink_ptr_value->set_format_config(config);
+    }
+    return *this;
+  }
+
+  auto source(source_path_mode mode, std::filesystem::path root = {})
+      -> logger_builder & {
+    source_path_ = mode;
+    source_root_ = std::move(root);
+    for (const auto &sink_ptr_value : sinks_) {
+      auto config = sink_ptr_value->format_config_value();
+      config.source_path = mode;
+      config.source_root = source_root_;
+      sink_ptr_value->set_format_config(config);
+    }
+    return *this;
+  }
+
+  auto color(bool enabled = true) -> logger_builder & {
+    colorize_ = enabled;
+    for (const auto &sink_ptr_value : sinks_) {
+      auto config = sink_ptr_value->format_config_value();
+      config.colorize = enabled;
+      sink_ptr_value->set_format_config(config);
+    }
+    return *this;
+  }
+
+  auto flush_when(log_level level) -> logger_builder & {
+    flush_on_ = level;
+    for (const auto &sink_ptr_value : sinks_) {
+      sink_ptr_value->set_flush_on(level);
+    }
+    return *this;
+  }
+
+  [[nodiscard]] auto make() const -> logger_ptr {
+    return std::make_shared<logger>(name_, sinks_, level_);
+  }
+
+  auto install() const -> logger_ptr {
+    auto logger_ptr_value = make();
+    registry::instance().register_logger(logger_ptr_value);
+    return logger_ptr_value;
+  }
+
+  auto install_as_default() const -> logger_ptr {
+    auto logger_ptr_value = install();
+    registry::instance().set_default_logger(logger_ptr_value);
+    return logger_ptr_value;
+  }
+
+private:
+  void apply_sink_defaults(sink &sink_ref) const {
+    if (pattern_.has_value()) {
+      sink_ref.set_pattern(*pattern_);
+    }
+    auto config = sink_ref.format_config_value();
+    if (detail_.has_value()) {
+      detail::apply_detail_mode_preset(&config, *detail_);
+    }
+    if (clock_mode_.has_value()) {
+      config.clock_mode = *clock_mode_;
+    }
+    if (source_path_.has_value()) {
+      config.source_path = *source_path_;
+      config.source_root = source_root_;
+    }
+    if (colorize_.has_value()) {
+      config.colorize = *colorize_;
+    }
+    sink_ref.set_format_config(config);
+    if (flush_on_.has_value()) {
+      sink_ref.set_flush_on(*flush_on_);
+    }
+  }
+
+  std::string name_;
+  std::vector<sink_ptr> sinks_;
+  log_level level_{log_level::info};
+  std::optional<std::string> pattern_;
+  std::optional<detail_mode> detail_;
+  std::optional<time_mode> clock_mode_;
+  std::optional<source_path_mode> source_path_;
+  std::filesystem::path source_root_;
+  std::optional<bool> colorize_;
+  std::optional<log_level> flush_on_;
+};
+
+[[nodiscard]] inline auto pipeline(std::string name) -> logger_builder {
+  return logger_builder{std::move(name)};
+}
+
+[[nodiscard]] inline auto to_string(log_level level) -> std::string_view {
+  return detail::level_to_string(level);
+}
+
+[[nodiscard]] inline auto to_short_string(log_level level) -> std::string_view {
+  return detail::level_to_short_string(level);
+}
+
+[[nodiscard]] inline auto parse_level(std::string_view text)
+    -> std::optional<log_level> {
+  return detail::level_from_string(text);
+}
 
 // 创建命名 logger 的全局快捷接口。
 inline auto create_logger(std::string name, std::vector<sink_ptr> sinks,

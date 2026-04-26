@@ -18,13 +18,32 @@ FastLog 的定位是“默认简单、深入可扩展”的工程日志库。
 - 统一的 `snake_case` 风格 API
 - 基础接口与高级接口并存
 - 控制台与文件日志支持 `compact / standard / full`
-- 源码位置仅支持两种模式：`filename / absolute`
-- 支持 `basic_file_sink`、`rotating_file_sink`、`daily_file_sink`
-- 支持 `async_sink` 与 `block / drop_oldest / drop_new`
-- 支持完全自定义 `pattern`
+- 源码位置支持 `filename / relative / absolute`
+- 支持 `basic_file_sink`、`rotating_file_sink`、`daily_file_sink`、`callback_sink`、`null_sink`、`fanout_sink`
+- 支持预分配环形队列 `async_sink` 与 `block / drop_oldest / drop_new`
+- 支持完全自定义 `pattern`，包含时间、级别、线程、进程、源码位置、函数名和颜色标记
+- 支持独立链式 `pipeline(...)` 构造接口，全程不需要日志宏
+- 适合配置的对象接口支持链式调用，例如 sink、logger 和 file logger 的 setter
 - 支持 backtrace ring buffer
 - 支持可选 `cpptrace`
+- 支持内置 benchmark target
 - 支持 CMake 安装导出和 `fastlog::fastlog`
+
+## 性能表现
+
+以下数据来自本机 `Release` 构建，测试命令：
+
+```bash
+./build-release/benchmarks/fastlog_spdlog_benchmark 3000000 8
+```
+
+| 场景 | FastLog | spdlog | FastLog / spdlog |
+| --- | ---: | ---: | ---: |
+| `sync/count` | 80,702,831 msg/s | 26,808,204 msg/s | 3.01x |
+| `async/count` | 11,271,220 msg/s | 5,794,598 msg/s | 1.95x |
+| `async/threaded` | 11,732,283 msg/s | 476,290 msg/s | 24.63x |
+
+这组数据表明，在当前 benchmark 场景下，FastLog 的同步、单线程异步和多线程异步吞吐均超过 spdlog。
 
 ## 项目环境
 
@@ -82,6 +101,54 @@ int main() {
     logger.warn("listening on port {}", 8080);
     fastlog::file::flush(logger);
 }
+```
+
+## 高级组合示例
+
+```cpp
+#include "fastlog/fastlog.hpp"
+
+#include <filesystem>
+
+int main() {
+    auto logger =
+        fastlog::pipeline("app")
+            .at(fastlog::log_level::trace)
+            .format_as("%Y [%^%L%$] [%n] [%@] %v")
+            .source(fastlog::source_path_mode::relative,
+                    std::filesystem::current_path())
+            .write_to(fastlog::make_stdout_sink())
+            .write_to_async(
+                fastlog::make_rotating_file_sink("logs/app.log"),
+                {.queue_size = 8192,
+                 .policy = fastlog::overflow_policy::block})
+            .install();
+
+    logger->info("service started without macros");
+    logger->flush();
+}
+```
+
+## 性能基准
+
+```bash
+cmake -S . -B build -DFASTLOG_BUILD_BENCHMARKS=ON
+cmake --build build --target fastlog_benchmark
+./build/benchmarks/fastlog_benchmark 1000000
+```
+
+如需和 spdlog 做同机同参数对比，benchmark 构建会通过 `FetchContent` 拉取 spdlog：
+
+```bash
+cmake -S . -B build-release \
+  -DFASTLOG_WITH_CPPTRACE=OFF \
+  -DFASTLOG_BUILD_TESTS=OFF \
+  -DFASTLOG_BUILD_EXAMPLES=OFF \
+  -DFASTLOG_BUILD_BENCHMARKS=ON \
+  -DFASTLOG_BENCHMARK_WITH_SPDLOG=ON \
+  -DCMAKE_BUILD_TYPE=Release
+cmake --build build-release --target fastlog_spdlog_benchmark
+./build-release/benchmarks/fastlog_spdlog_benchmark 1000000 4
 ```
 
 ## 文档

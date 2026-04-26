@@ -21,7 +21,7 @@ struct FileLoggerOptions {
   ::fastlog::source_path_mode source_path{
       ::fastlog::source_path_mode::filename}; // 源码路径输出模式。
   std::filesystem::path
-      source_root{}; // 保留字段；当前源码位置输出模式不再依赖路径裁剪基准目录。
+      source_root{}; // relative 源码路径模式使用的裁剪基准目录。
   std::size_t max_file_size{1024 * 1024 * 100}; // 单个日志文件最大大小。
   std::size_t max_files{5};                     // 保留的轮转文件数量。
   bool async_write{true};                       // 是否默认使用异步包装。
@@ -85,10 +85,11 @@ public:
   }
 
   // 设置 logger 自身级别。
-  void set_level(log_level level) const {
+  auto set_level(log_level level) const -> const FileLogger & {
     if (logger_handle_ != nullptr) {
       logger_handle_->set_level(level);
     }
+    return *this;
   }
 
   // 获取 logger 当前级别。
@@ -96,18 +97,33 @@ public:
     return logger_handle_ != nullptr ? logger_handle_->level() : log_level::off;
   }
 
+  // 判断指定级别是否会被当前 logger 接收，便于昂贵日志内容手动短路。
+  [[nodiscard]] auto should_log(log_level level_value) const -> bool {
+    return logger_handle_ != nullptr && logger_handle_->should_log(level_value);
+  }
+
+  // 设置所有当前 sink 的自动 flush 阈值。
+  auto set_flush_on(log_level level_value) const -> const FileLogger & {
+    if (logger_handle_ != nullptr) {
+      logger_handle_->set_flush_on(level_value);
+    }
+    return *this;
+  }
+
   // 开启 backtrace ring buffer。
-  void enable_backtrace(std::size_t capacity) const {
+  auto enable_backtrace(std::size_t capacity) const -> const FileLogger & {
     if (logger_handle_ != nullptr) {
       logger_handle_->enable_backtrace(capacity);
     }
+    return *this;
   }
 
   // 关闭 backtrace ring buffer。
-  void disable_backtrace() const {
+  auto disable_backtrace() const -> const FileLogger & {
     if (logger_handle_ != nullptr) {
       logger_handle_->disable_backtrace();
     }
+    return *this;
   }
 
   // 将缓存的 backtrace 补发到 sink。
@@ -211,12 +227,12 @@ public:
   }
 
   // 设置 detail 模式。
-  void set_detail_mode(detail_mode mode) const {
+  auto set_detail_mode(detail_mode mode) const -> const FileLogger & {
     if (auto rotating = rotating_sink(); rotating != nullptr) {
       auto config = rotating->format_config_value();
       detail::apply_detail_mode_preset(&config, mode);
       rotating->set_format_config(config);
-      return;
+      return *this;
     }
 
     for (const auto &sink_ptr_value : sinks()) {
@@ -224,17 +240,19 @@ public:
       detail::apply_detail_mode_preset(&config, mode);
       sink_ptr_value->set_format_config(config);
     }
+    return *this;
   }
 
   // 设置源码路径模式。
-  void set_source_path_mode(source_path_mode mode,
-                            std::filesystem::path source_root = {}) const {
+  auto set_source_path_mode(source_path_mode mode,
+                            std::filesystem::path source_root = {}) const
+      -> const FileLogger & {
     if (auto rotating = rotating_sink(); rotating != nullptr) {
       auto config = rotating->format_config_value();
       config.source_path = mode;
       config.source_root = std::move(source_root);
       rotating->set_format_config(config);
-      return;
+      return *this;
     }
 
     for (const auto &sink_ptr_value : sinks()) {
@@ -243,13 +261,15 @@ public:
       config.source_root = source_root;
       sink_ptr_value->set_format_config(config);
     }
+    return *this;
   }
 
   // 设置轮转文件大小阈值。
-  void set_max_file_size(std::size_t max_file_size) const {
+  auto set_max_file_size(std::size_t max_file_size) const
+      -> const FileLogger & {
     if (auto rotating = rotating_sink(); rotating != nullptr) {
       rotating->set_max_file_size(max_file_size);
-      return;
+      return *this;
     }
 
     for (const auto &sink_ptr_value : sinks()) {
@@ -259,6 +279,7 @@ public:
         rotating->set_max_file_size(max_file_size);
       }
     }
+    return *this;
   }
 
 private:
@@ -533,26 +554,36 @@ inline void delete_logger(const std::string &logger_name) {
 }
 
 // 设置文件 logger 的最小级别。
-inline void set_level(const FileLogger &logger_ref, log_level level) {
-  logger_ref.set_level(level);
+inline auto set_level(const FileLogger &logger_ref, log_level level)
+    -> const FileLogger & {
+  return logger_ref.set_level(level);
 }
 
 // 设置文件 logger 所有 sink 的 detail 模式。
-inline void set_detail_mode(const FileLogger &logger_ref, detail_mode mode) {
-  logger_ref.set_detail_mode(mode);
+inline auto set_detail_mode(const FileLogger &logger_ref, detail_mode mode)
+    -> const FileLogger & {
+  return logger_ref.set_detail_mode(mode);
 }
 
 // 设置文件 logger 的源码路径模式。
-inline void set_source_path_mode(const FileLogger &logger_ref,
+inline auto set_source_path_mode(const FileLogger &logger_ref,
                                  source_path_mode mode,
-                                 std::filesystem::path source_root = {}) {
-  logger_ref.set_source_path_mode(mode, std::move(source_root));
+                                 std::filesystem::path source_root = {})
+    -> const FileLogger & {
+  return logger_ref.set_source_path_mode(mode, std::move(source_root));
 }
 
 // 设置文件 logger 的单文件最大大小。
-inline void set_max_file_size(const FileLogger &logger_ref,
-                              std::size_t max_file_size) {
-  logger_ref.set_max_file_size(max_file_size);
+inline auto set_max_file_size(const FileLogger &logger_ref,
+                              std::size_t max_file_size)
+    -> const FileLogger & {
+  return logger_ref.set_max_file_size(max_file_size);
+}
+
+// 设置文件 logger 的自动 flush 阈值。
+inline auto set_flush_on(const FileLogger &logger_ref, log_level level)
+    -> const FileLogger & {
+  return logger_ref.set_flush_on(level);
 }
 
 // 主动刷新文件 logger。
